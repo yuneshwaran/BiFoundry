@@ -1,0 +1,9 @@
+venv
+.env
+project
+output
+logs/*
+*.pyc
+*/__pycache__/*
+__pycache__/*
+.work
