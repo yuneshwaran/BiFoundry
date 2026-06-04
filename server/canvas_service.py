@@ -15,9 +15,10 @@ from config import PBIP_SCHEMA_URL, WORK_ROOT
 from database import engine, init_db
 from db_loader import DBLoader, DBReader
 from extractors.report_extractor import ReportExtractor
+from pbip_generator.connection_builder import build_dataset_reference, needs_local_semantic_model
 from pbip_generator.report_writer import ReportWriter
 from pbip_generator.model_writer import SemanticModelWriter
-from services.utils import _safe_name
+from services.utils import _safe_name, _semantic_model_package_from_files, _load_semantic_model_row
 from schema import (
     canvas_pages,
     canvas_reports,
@@ -144,6 +145,8 @@ def _build_template_payload(report_name, page_name, visual_name, visual_json, so
     visual_type = _visual_type_from_payload(visual_json, template_key)
     default_format = deepcopy((visual_json or {}).get("config") or {})
     default_visual_json = deepcopy(visual_json or {})
+    if not isinstance(default_visual_json.get("query"), dict):
+        default_visual_json["query"] = {"queryState": {"projections": {}}}
     default_visual_json.setdefault("visualType", visual_type)
     default_visual_json.setdefault(
         "_templateSource",
@@ -228,22 +231,20 @@ def _default_page_page_json(page_name, width, height):
 
 
 def _default_report_json(report_settings, canvas_settings):
-    theme_color = report_settings.get("themeColor") or "#154360"
     theme_name = report_settings.get("themeName") or "BIFoundryTheme"
     return {
         "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/report/3.2.0/schema.json",
         "themeCollection": {
-            "baseTheme": {
-                "name": theme_name,
-                "type": "SharedResources",
-                "reportVersionAtImport": {
-                    "visual": "2.8.0",
-                    "report": "3.2.0",
-                    "page": "2.3.1",
-                },
-                "color": theme_color,
-            }
-        },
+                "baseTheme": {
+                    "name": theme_name,
+                    "type": "SharedResources",
+                    "reportVersionAtImport": {
+                        "visual": "2.8.0",
+                        "report": "3.2.0",
+                        "page": "2.3.1",
+                    },
+                }
+            },
         "objects": {
             "section": [
                 {
@@ -305,7 +306,7 @@ def _default_visual_templates():
             "visual_type": "clusteredBarChart",
             "slot_definitions": [
                 slot("X Axis", "Category", "column", True, False, "Choose the category or axis column"),
-                slot("Y Axis / Value", "Y", "measure", True, False, "Choose the measure to plot"),
+                slot("Y Axis / Value", "Y", "any", True, False, "Choose the measure to plot"),
                 slot("Legend", "Legend", "column", False, False, "Optional legend grouping"),
                 slot("Tooltip", "Tooltip", "any", False, False, "Optional tooltip fields"),
             ],
@@ -1380,17 +1381,14 @@ def _prepare_semantic_model_output(output_root, source_semantic_model):
         source_files = reader.get_semantic_model_files_by_scope(source_semantic_model["id"], "semantic_model")
         dataset = reader.get_semantic_model(source_semantic_model["id"])
 
-    if source_files:
-        _write_project_files(semantic_target, source_files)
-        return semantic_folder_name
-
-    if not dataset:
+    if not dataset and not source_files:
         raise HTTPException(
             status_code=400,
             detail=f"Unable to locate a semantic model for '{source_semantic_model['name']}'.",
         )
 
-    SemanticModelWriter(output_root).write(dataset.get("raw") or {}, project_name=source_semantic_model["name"])
+    semantic_payload = _semantic_model_package_from_files((dataset or {}).get("raw") or {}, source_files)
+    SemanticModelWriter(output_root).write(semantic_payload, project_name=source_semantic_model["name"])
     return semantic_folder_name
 
 
@@ -1542,7 +1540,6 @@ def _default_report_json_from_settings(settings):
                     "page": "2.3.1",
                 },
                 "type": "SharedResources",
-                "color": settings.get("theme_color") or "#154360",
             }
         },
         "objects": {
@@ -1580,10 +1577,6 @@ def _default_report_json_from_settings(settings):
             "allowChangeFilterTypes": True,
             "useEnhancedTooltips": True,
             "useDefaultAggregateDisplayName": True,
-            "canvas": {
-                "width": settings.get("canvas_width") or DEFAULT_CANVAS_WIDTH,
-                "height": settings.get("canvas_height") or DEFAULT_CANVAS_HEIGHT,
-            },
         },
     }
 
@@ -2206,19 +2199,23 @@ def compile_canvas_report_v2(report_id):
     try:
         detail = _report_detail_v2(report_id)
         semantic_model = _semantic_model_output_root(detail)
-        semantic_folder_name = semantic_model.get("semantic_model_folder_name") or f"{semantic_model['name']}.SemanticModel"
         report_folder_name = f"{_safe_name(detail['name'], fallback='Draft')}.Report"
-        dataset_reference = _dataset_reference_from_semantic_model(semantic_model)
         canvas_settings = _canvas_report_settings(detail)
         template_map = {}
         with engine.begin() as conn:
             reader = DBReader(conn)
             template_map = {row["id"]: row for row in reader.get_visual_templates()}
-            source_files = reader.get_semantic_model_files_by_scope(semantic_model["id"], "semantic_model")
-            if source_files:
-                _write_project_files(Path(compile_root) / semantic_folder_name, source_files)
+            
+            source_row, source_kind = _load_semantic_model_row(conn, detail.get("project_id") or semantic_model["id"])
+            dataset_reference = build_dataset_reference(source_row, source_kind)
+
+            if needs_local_semantic_model(source_kind):
+                semantic_folder_name = semantic_model.get("semantic_model_folder_name") or f"{semantic_model['name']}.SemanticModel"
+                source_files = reader.get_semantic_model_files_by_scope(semantic_model["id"], "semantic_model")
+                semantic_payload = _semantic_model_package_from_files((semantic_model or {}).get("raw") or {}, source_files)
+                SemanticModelWriter(str(compile_root)).write(semantic_payload, project_name=semantic_model["name"])
             else:
-                SemanticModelWriter(str(compile_root)).write(semantic_model.get("raw") or {}, project_name=semantic_model["name"])
+                semantic_folder_name = None
 
         pages = []
         for page in detail["pages"]:

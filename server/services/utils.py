@@ -1,3 +1,4 @@
+import json
 import re
 import shutil
 from datetime import datetime, timezone
@@ -58,3 +59,67 @@ def _load_semantic_model_row(conn, semantic_model_row_id):
     if row:
         return row, "local"
     return None, None
+
+
+def _semantic_model_package_from_files(raw_dataset=None, file_rows=None):
+    package = dict(raw_dataset or {})
+    definition_files = dict(package.get("definitionFiles") or {})
+    support_files = dict(package.get("supportFiles") or {})
+    definition_pbism = package.get("definitionPbism")
+    model = package.get("model")
+
+    for file_row in file_rows or []:
+        relative_path = (file_row or {}).get("relative_path") or ""
+        content_kind = (file_row or {}).get("content_kind")
+        json_content = (file_row or {}).get("json_content")
+        text_content = (file_row or {}).get("text_content")
+        binary_base64 = (file_row or {}).get("binary_base64")
+        payload = None
+
+        if content_kind == "json" and json_content is not None:
+            payload = {"kind": "json", "content": json_content}
+        elif content_kind == "text" and text_content is not None:
+            payload = {"kind": "text", "content": text_content}
+        elif content_kind == "binary" and binary_base64 is not None:
+            payload = {"kind": "base64", "content": binary_base64}
+
+        if not relative_path or payload is None:
+            continue
+
+        normalized_path = relative_path.replace("\\", "/")
+        if normalized_path == "model.bim":
+            if content_kind == "json" and isinstance(json_content, dict):
+                model = json_content
+            elif content_kind == "text" and isinstance(text_content, str):
+                try:
+                    model = json.loads(text_content)
+                except json.JSONDecodeError:
+                    pass
+            continue
+
+        if normalized_path == "definition.pbism":
+            if content_kind == "json" and isinstance(json_content, dict):
+                definition_pbism = json_content
+            elif content_kind == "text" and isinstance(text_content, str):
+                try:
+                    definition_pbism = json.loads(text_content)
+                except json.JSONDecodeError:
+                    pass
+            continue
+
+        if normalized_path.startswith("definition/") and normalized_path.endswith(".tmdl"):
+            definition_files[normalized_path.removeprefix("definition/")] = text_content or ""
+            continue
+
+        support_files[normalized_path] = payload
+
+    if definition_files:
+        package["definitionFiles"] = definition_files
+    if support_files:
+        package["supportFiles"] = support_files
+    if definition_pbism is not None:
+        package["definitionPbism"] = definition_pbism
+    if model is not None:
+        package["model"] = model
+
+    return package

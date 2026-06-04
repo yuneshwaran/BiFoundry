@@ -50,6 +50,9 @@ class ReportWriter:
         )
         if report_json is None:
             report_json = self._build_default_report_json()
+        else:
+            report_json = self._normalize_report_json(report_json)
+        report_json = self._sanitize_nested_null_queries(report_json)
         self._write_json_file(os.path.join(definition_path, "report.json"), report_json)
 
         version_json = self._extract_json_payload(
@@ -68,6 +71,7 @@ class ReportWriter:
 
         pages = self._extract_pages(report)
         pages_json = self._build_pages_metadata(report, pages)
+        pages_json = self._sanitize_nested_null_queries(pages_json)
         self._write_json_file(os.path.join(pages_root, "pages.json"), pages_json)
         self._write_additional_json_assets(
             definition_path,
@@ -94,6 +98,7 @@ class ReportWriter:
         os.makedirs(visuals_path, exist_ok=True)
 
         page_json = self._extract_page_json(page)
+        page_json = self._sanitize_nested_null_queries(page_json)
         self._write_json_file(os.path.join(page_path, "page.json"), page_json)
         self._write_additional_json_assets(
             page_path,
@@ -110,6 +115,7 @@ class ReportWriter:
         os.makedirs(visual_path, exist_ok=True)
 
         visual_json = self._extract_visual_json(visual)
+        visual_json = self._sanitize_nested_null_queries(visual_json)
         self._write_json_file(os.path.join(visual_path, "visual.json"), visual_json)
         self._write_additional_json_assets(
             visual_path,
@@ -312,13 +318,66 @@ class ReportWriter:
             ),
         )
         if isinstance(raw_visual, dict):
-            return deepcopy(raw_visual)
+            return self._normalize_visual_json(deepcopy(raw_visual))
 
         return {
             key: deepcopy(value)
             for key, value in visual.items()
             if key not in {"files"}
         }
+
+    def _normalize_report_json(self, report_json):
+        normalized = deepcopy(report_json)
+        if not isinstance(normalized, dict):
+            return normalized
+
+        normalized.pop("canvas", None)
+
+        theme_collection = normalized.get("themeCollection")
+        if isinstance(theme_collection, dict):
+            base_theme = theme_collection.get("baseTheme")
+            if isinstance(base_theme, dict):
+                base_theme.pop("color", None)
+
+        settings = normalized.get("settings")
+        if isinstance(settings, dict):
+            settings.pop("canvas", None)
+
+        return normalized
+
+    def _normalize_visual_json(self, visual_json):
+        normalized = deepcopy(visual_json)
+        if not isinstance(normalized, dict):
+            return normalized
+
+        query = normalized.get("query")
+        if not isinstance(query, dict):
+            normalized["query"] = {"queryState": {"projections": {}}}
+            return normalized
+
+        query_state = query.get("queryState")
+        if not isinstance(query_state, dict):
+            query["queryState"] = {"projections": {}}
+            return normalized
+
+        projections = query_state.get("projections")
+        if not isinstance(projections, dict):
+            query_state["projections"] = {}
+
+        return normalized
+
+    def _sanitize_nested_null_queries(self, value):
+        if isinstance(value, dict):
+            sanitized = {}
+            for key, item in value.items():
+                if key == "query" and item is None:
+                    sanitized[key] = {"queryState": {"projections": {}}}
+                else:
+                    sanitized[key] = self._sanitize_nested_null_queries(item)
+            return sanitized
+        if isinstance(value, list):
+            return [self._sanitize_nested_null_queries(item) for item in value]
+        return value
 
     def _extract_visual_files(self, visual):
         return self._extract_files_payload(

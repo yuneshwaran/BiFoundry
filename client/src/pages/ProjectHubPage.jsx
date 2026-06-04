@@ -18,7 +18,7 @@ export default function ProjectsPage() {
   const [workspaceId, setWorkspaceId] = useState('');
   const [semanticModelRowId, setSemanticModelRowId] = useState('');
   const [semanticModelTouched, setSemanticModelTouched] = useState(false);
-  const [projectName, setProjectName] = useState('Untitled Project');
+  const [projectName, setProjectName] = useState('');
   const [error, setError] = useState('');
 
   const activeConnectionId = activeConnection?.id;
@@ -126,7 +126,7 @@ export default function ProjectsPage() {
     }
 
     createProjectMutation.mutate({
-      name: projectName.trim() || 'Untitled Project',
+      name: projectName.trim() || selectedModel.semantic_model_name || selectedModel.name || 'Project',
       source_semantic_model_id: Number(semanticModelRowId),
       canvas_settings: {
         width: 1280,
@@ -229,7 +229,7 @@ export default function ProjectsPage() {
               type="text"
               value={projectName}
               onChange={(event) => setProjectName(event.target.value)}
-              placeholder="Project name"
+              placeholder="Project name (optional)"
             />
             <select className="input" value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} disabled={!activeConnectionId}>
               <option value="">Choose workspace</option>

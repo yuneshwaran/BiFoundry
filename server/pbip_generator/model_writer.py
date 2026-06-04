@@ -24,11 +24,7 @@ class SemanticModelWriter:
 
         definition_pbism = raw_dataset.get("definitionPbism")
         if not isinstance(definition_pbism, dict) or not definition_pbism:
-            definition_pbism = {
-                "$schema": self.PBISM_SCHEMA_URL,
-                "version": "4.2",
-                "settings": {},
-            }
+            definition_pbism = {"version": "1.0"}
 
         self._write_json(os.path.join(path, "definition.pbism"), definition_pbism)
 
@@ -62,13 +58,51 @@ class SemanticModelWriter:
     def _resolve_model_bim(self, raw_dataset):
         model = raw_dataset.get("model", {})
         if isinstance(model, dict) and model:
-            return model
+            return self._normalize_model_bim(model, raw_dataset)
 
         definition_files = raw_dataset.get("definitionFiles", {})
         if isinstance(definition_files, dict) and definition_files:
             return self._build_model_bim_from_tmdl(definition_files)
 
         return {}
+
+    def _normalize_model_bim(self, model, raw_dataset):
+        model_name = raw_dataset.get("name") or model.get("name") or "Model"
+        compatibility_level = raw_dataset.get("compatibilityLevel") or model.get("compatibilityLevel") or 1600
+        normalized_model = self._strip_database_metadata(model)
+
+        model_tables = model.get("tables")
+        if isinstance(model_tables, list):
+            normalized_model["tables"] = [self._ensure_table_partitions(table) for table in model_tables]
+
+        model_relationships = model.get("relationships")
+        if isinstance(model_relationships, list):
+            normalized_model["relationships"] = model_relationships
+
+        if not normalized_model.get("tables"):
+            definition_files = raw_dataset.get("definitionFiles", {})
+            if isinstance(definition_files, dict) and definition_files:
+                rebuilt = self._build_model_bim_from_tmdl(definition_files)
+                if isinstance(rebuilt, dict):
+                    return rebuilt
+
+        if "tables" not in normalized_model:
+            normalized_model["tables"] = []
+        else:
+            normalized_model["tables"] = [self._ensure_table_partitions(table) for table in normalized_model["tables"]]
+
+        return {
+            "name": model_name,
+            "compatibilityLevel": compatibility_level,
+            "model": normalized_model,
+        }
+
+    def _strip_database_metadata(self, model):
+        return {
+            key: value
+            for key, value in model.items()
+            if key not in {"name", "compatibilityLevel", "tables", "relationships", "cultures", "annotations", "perspectives"}
+        }
 
     def _detect_semantic_format(self, raw_dataset):
         definition_files = raw_dataset.get("definitionFiles", {})
@@ -124,15 +158,88 @@ class SemanticModelWriter:
             if key.startswith("tables/") and key.endswith(".tmdl")
         }
         model_payload["tables"] = [
-            self._parse_table_tmdl(table_files[path_key])
+            self._ensure_table_partitions(self._parse_table_tmdl(table_files[path_key]))
             for path_key in sorted(table_files)
         ]
+
+        model_payload = self._strip_database_metadata(model_payload)
 
         return {
             "name": model_name,
             "compatibilityLevel": compatibility_level,
             "model": model_payload,
         }
+
+    def _ensure_table_partitions(self, table):
+        if not isinstance(table, dict):
+            return table
+
+        partitions = table.get("partitions")
+        if isinstance(partitions, list) and partitions:
+            return table
+        
+        columns = table.get("columns") or []
+        table_name = table.get("name") or "Table"
+        
+        expression = self._build_empty_table_expression(table_name, columns)
+        assert expression
+
+        partition = {
+            "name": f"{table_name}_Partition",
+            "mode": "import",
+            "source": {
+                "type": "m",
+                "expression": expression,
+            },
+        }
+
+        next_table = dict(table)
+        next_table["partitions"] = [partition]
+        return next_table
+
+    def _build_empty_table_expression(self, table_name, columns):
+        type_sig = self._build_m_type_signature(columns)
+        lines = [
+            "let",
+            f'    Source = #table(type table [{type_sig}], {{}})',
+            "in",
+            "    Source",
+        ]
+        return "\n".join(lines)
+
+    def _build_m_type_signature(self, columns):
+        parts = []
+        for column in columns or []:
+            name = column.get("name")
+            if not name:
+                continue
+            data_type = column.get("dataType") or column.get("data_type") or column.get("type")
+            parts.append(f"{self._escape_m_identifier(name)} = {self._map_data_type_to_m(data_type)}")
+
+        if not parts:
+            return "Dummy = type any"
+
+        return ", ".join(parts)
+
+    def _escape_m_identifier(self, value):
+        text = str(value).replace('"', '""')
+        if text and text[0].isalpha() and all(char.isalnum() or char == "_" for char in text):
+            return text
+        return f'#"{text}"'
+
+    def _map_data_type_to_m(self, data_type):
+        normalized = str(data_type or "").lower()
+        if normalized in {"int64", "int", "integer", "whole number"}:
+            return "Int64.Type"
+        if normalized in {"double", "decimal", "currency", "number", "numeric"}:
+            return "type number"
+        if normalized in {"boolean", "bool"}:
+            return "type logical"
+        if normalized in {"date"}:
+            return "type date"
+        if normalized in {"datetime", "datetimezone", "time"}:
+            return "type datetime"
+        return "type text"
 
     def _parse_table_tmdl(self, content):
         table = {"columns": [], "partitions": []}

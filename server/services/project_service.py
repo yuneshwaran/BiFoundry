@@ -18,6 +18,7 @@ from models import (
     project_semantic_model_cache,
     visual_templates,
 )
+from pbip_generator.connection_builder import build_dataset_reference, needs_local_semantic_model
 from pbip_generator.model_writer import SemanticModelWriter
 from pbip_generator.report_writer import ReportWriter
 from services.powerbi_client import iso_now
@@ -346,20 +347,18 @@ def _binding_to_field_key(binding):
 
 
 def _default_report_json(report_settings, canvas_settings):
-    theme_color = report_settings.get("themeColor") or "#154360"
     theme_name = report_settings.get("themeName") or "BIFoundryTheme"
     return {
         "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/report/3.2.0/schema.json",
         "themeCollection": {
-            "baseTheme": {
-                "name": theme_name,
-                "type": "SharedResources",
-                "color": theme_color,
-                "reportVersionAtImport": {
-                    "visual": "2.8.0",
-                    "report": "3.2.0",
-                    "page": "2.3.1",
-                },
+                "baseTheme": {
+                    "name": theme_name,
+                    "type": "SharedResources",
+                    "reportVersionAtImport": {
+                        "visual": "2.8.0",
+                        "report": "3.2.0",
+                        "page": "2.3.1",
+                    },
             }
         },
         "objects": {
@@ -381,10 +380,6 @@ def _default_report_json(report_settings, canvas_settings):
             "useEnhancedTooltips": True,
             "useDefaultAggregateDisplayName": True,
         },
-        "canvas": {
-            "width": canvas_settings.get("width") or 1280,
-            "height": canvas_settings.get("height") or 720,
-        },
     }
 
 
@@ -404,7 +399,13 @@ def _default_page_json(page_row):
 
 
 def _default_visual_json(visual_row, template_row):
+    
     base = deepcopy((template_row or {}).get("default_visual_json") or {})
+    
+    # Purge any null/invalid query from template before building
+    if not isinstance(base.get("query"), dict):
+        base["query"] = {}
+    
     template_key = visual_row.get("template_key") or (template_row or {}).get("template_key") or "visual"
     base.setdefault("visualType", template_key)
     base.setdefault("position", {})
@@ -412,10 +413,16 @@ def _default_visual_json(visual_row, template_row):
     base["position"].setdefault("y", visual_row.get("y") or 0)
     base["position"].setdefault("width", visual_row.get("w") or (template_row or {}).get("default_width") or 3)
     base["position"].setdefault("height", visual_row.get("h") or (template_row or {}).get("default_height") or 2)
+    
     bindings = visual_row.get("bindings") or {}
-    base.setdefault("query", {})
+    
+    # Ensure queryState is always a valid dict
     base["query"].setdefault("queryState", {})
+    if not isinstance(base["query"].get("queryState"), dict):
+        base["query"]["queryState"] = {}
     projections = base["query"]["queryState"].setdefault("projections", {})
+    
+    # ... rest of the binding logic unchanged
     for slot_name, binding in bindings.items():
         projections.setdefault(slot_name, [])
         if isinstance(binding, list):
@@ -533,10 +540,8 @@ def list_drafts():
 def create_draft(payload):
     init_db()
     payload = _as_dict(payload)
-    name = payload.get("name")
+    name = (payload.get("name") or "").strip()
     source_semantic_model_id = payload.get("source_semantic_model_id")
-    if not name:
-        raise HTTPException(status_code=400, detail="Draft name is required.")
     if not source_semantic_model_id:
         raise HTTPException(status_code=400, detail="A selected semantic model id is required.")
     canvas_settings = payload.get("canvas_settings") or {}
@@ -547,6 +552,8 @@ def create_draft(payload):
         source_row, source_kind = _load_semantic_model_row(conn, source_semantic_model_id)
         if not source_row:
             raise HTTPException(status_code=404, detail="Selected semantic model was not found.")
+        if not name:
+            name = source_row.get("semantic_model_name") or source_row.get("name") or f"Project {source_semantic_model_id}"
         report_id = DBLoader(conn).insert_canvas_report(
             name=name,
             description=payload.get("description"),
@@ -910,18 +917,44 @@ def get_draft_fields(draft_id):
     }
 
 
+# def _synthesise_semantic_model_from_snapshot(source_name, snapshot):
+#     tables = {}
+#     for field in snapshot.get("field_catalog") or []:
+#         table_name = field.get("table") or "Table"
+#         table = tables.setdefault(
+#             table_name,
+#             {
+#                 "name": table_name,
+#                 "columns": [],
+#                 "measures": [],
+#             },
+#         )
+#         payload = {
+#             "name": field.get("name"),
+#             "dataType": field.get("data_type"),
+#         }
+#         if field.get("kind") == "measure":
+#             table["measures"].append(payload)
+#         else:
+#             table["columns"].append(payload)
+#     return {
+#         "model": {
+#             "name": source_name,
+#             "compatibilityLevel": 1601,
+#             "tables": list(tables.values()),
+#             "relationships": snapshot.get("relationship_catalog") or [],
+#         }
+#     }
+    
 def _synthesise_semantic_model_from_snapshot(source_name, snapshot):
     tables = {}
     for field in snapshot.get("field_catalog") or []:
         table_name = field.get("table") or "Table"
-        table = tables.setdefault(
-            table_name,
-            {
-                "name": table_name,
-                "columns": [],
-                "measures": [],
-            },
-        )
+        table = tables.setdefault(table_name, {
+            "name": table_name,
+            "columns": [],
+            "measures": [],
+        })
         payload = {
             "name": field.get("name"),
             "dataType": field.get("data_type"),
@@ -930,29 +963,29 @@ def _synthesise_semantic_model_from_snapshot(source_name, snapshot):
             table["measures"].append(payload)
         else:
             table["columns"].append(payload)
-    # return {
-    #     "name": source_name,
-    #     "compatibilityLevel": 1601,
-    #     "model": {
-    #         "name": source_name,
-    #         "tables": list(tables.values()),
-    #         "relationships": snapshot.get("relationship_catalog") or [],
-    #     },
+
+    # Return as raw_dataset shape — SemanticModelWriter reads raw_dataset.get("model")
+    # and then wraps it with name + compatibilityLevel at the top level
     return {
-    "model": {
         "name": source_name,
         "compatibilityLevel": 1601,
-        "tables": list(tables.values()),
-        "relationships": snapshot.get("relationship_catalog") or [],
+        "model": {
+            "tables": list(tables.values()),
+            "relationships": snapshot.get("relationship_catalog") or [],
+        }
     }
-}
-    
 
-
-def _build_report_payload(detail, semantic_folder_name):
+def _build_report_payload(detail, semantic_folder_name, dataset_reference):
     report_settings = detail.get("report_settings") or {}
     canvas_settings = detail.get("canvas_settings") or {}
     report_folder_name = f"{_safe_name(detail['name'], fallback='Draft')}.Report"
+    
+    definition_pbir = {
+        "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definitionProperties/2.0.0/schema.json",
+        "version": "4.0",
+        "datasetReference": dataset_reference,
+    }
+
     pages = []
     for page in detail.get("pages") or []:
         visuals = []
@@ -981,11 +1014,7 @@ def _build_report_payload(detail, semantic_folder_name):
         "projectName": detail["name"],
         "reportFolderName": report_folder_name,
         "semanticModelFolderName": semantic_folder_name,
-        "definitionPbir": {
-            "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definitionProperties/2.0.0/schema.json",
-            "version": "4.0",
-            "datasetReference": {"byPath": {"path": f"../{semantic_folder_name}"}},
-        },
+        "definitionPbir": definition_pbir,
         "report": _default_report_json(report_settings, canvas_settings),
         "pages": pages,
     }
@@ -1005,14 +1034,22 @@ def compile_draft(draft_id):
         if not source_snapshot.get("field_catalog"):
             raise HTTPException(status_code=400, detail="Refresh the project metadata cache before compiling.")
         source_name = _safe_name(detail.get("source_semantic_model_name") or detail["name"], fallback=detail["name"])
-        semantic_folder_name = f"{source_name}.SemanticModel"
-        dataset_payload = _synthesise_semantic_model_from_snapshot(source_name, source_snapshot)
-        SemanticModelWriter(str(compile_root)).write(dataset_payload, project_name=source_name)
-        report_payload = _build_report_payload(detail, semantic_folder_name)
+        source_row, source_kind = _load_semantic_model_row(conn, detail["source_semantic_model_id"])
+
+        dataset_reference = build_dataset_reference(source_row, source_kind)
+
+        if needs_local_semantic_model(source_kind):
+            semantic_folder_name = f"{source_name}.SemanticModel"
+            dataset_payload = _synthesise_semantic_model_from_snapshot(source_name, source_snapshot)
+            SemanticModelWriter(str(compile_root)).write(dataset_payload, project_name=source_name)
+        else:
+            semantic_folder_name = None
+
+        report_payload = _build_report_payload(detail, semantic_folder_name, dataset_reference)
         ReportWriter(str(compile_root)).write(
             report_payload,
             project_name=detail["name"],
-            dataset_reference={"byPath": {"path": f"../{semantic_folder_name}"}},
+            dataset_reference=dataset_reference,
         )
         safe_report_name = _safe_name(detail["name"], fallback="Draft")
         pbip_path = compile_root / f"{safe_report_name}.pbip"

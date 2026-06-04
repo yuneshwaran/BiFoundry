@@ -34,6 +34,7 @@ export default function ProjectPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [selectedPageId, setSelectedPageId] = useState(null);
+  const [cachedFields, setCachedFields] = useState({ tables: [], fields: [], relationships: [], debug: {} });
   const [pageForm, setPageForm] = useState({
     name: '',
     display_name: '',
@@ -53,6 +54,12 @@ export default function ProjectPage() {
     queryFn: () => getProjectFields(numericProjectId),
     enabled: Number.isFinite(numericProjectId),
   });
+
+  useEffect(() => {
+    if (fieldsQuery.data && Array.isArray(fieldsQuery.data.fields) && fieldsQuery.data.fields.length) {
+      setCachedFields(fieldsQuery.data);
+    }
+  }, [fieldsQuery.data]);
 
   const project = projectQuery.data;
   const pages = useMemo(() => project?.pages || [], [project?.pages]);
@@ -299,40 +306,40 @@ export default function ProjectPage() {
           <div className="section-title">Metadata cache</div>
           <div className="panel-card">
             <div className="panel-card__title">Fields</div>
-            <div className="helper-text">{fieldsQuery.data?.fields?.length || 0} cached fields</div>
-            {fieldsQuery.data?.debug?.metadata_status?.source ? (
-              <div className="helper-text">Metadata source: {fieldsQuery.data.debug.metadata_status.source}</div>
+            <div className="helper-text">{cachedFields?.fields?.length || 0} cached fields</div>
+            {cachedFields?.debug?.metadata_status?.source ? (
+              <div className="helper-text">Metadata source: {cachedFields.debug.metadata_status.source}</div>
             ) : null}
-            {fieldsQuery.data?.debug?.admin_scan_error ? (
+            {cachedFields?.debug?.admin_scan_error ? (
               <div className="helper-text" style={{ marginTop: '0.75rem', color: '#9f3a38' }}>
-                Admin scan error: {fieldsQuery.data.debug.admin_scan_error}
+                Admin scan error: {cachedFields.debug.admin_scan_error}
               </div>
             ) : null}
-            {fieldsQuery.data?.debug?.admin_scan_status ? (
-              <div className="helper-text">Admin scan status: {fieldsQuery.data.debug.admin_scan_status}</div>
+            {cachedFields?.debug?.admin_scan_status ? (
+              <div className="helper-text">Admin scan status: {cachedFields.debug.admin_scan_status}</div>
             ) : null}
             <div className="mini-summary">
-              {(fieldsQuery.data?.tables || []).slice(0, 6).map((table) => (
+              {(cachedFields?.tables || []).slice(0, 6).map((table) => (
                 <div key={table.table}>
                   {table.table}: {table.fields.length}
                 </div>
               ))}
             </div>
-            {fieldsQuery.data?.debug?.xmla_error ? (
+            {cachedFields?.debug?.xmla_error ? (
               <div className="helper-text" style={{ marginTop: '0.75rem', color: '#9f3a38' }}>
-                XMLA error: {fieldsQuery.data.debug.xmla_error}
+                XMLA error: {cachedFields.debug.xmla_error}
               </div>
             ) : null}
-            {fieldsQuery.data?.debug?.dax_error ? (
+            {cachedFields?.debug?.dax_error ? (
               <div className="helper-text" style={{ marginTop: '0.75rem', color: '#9f3a38' }}>
-                DAX metadata error: {fieldsQuery.data.debug.dax_error}
+                DAX metadata error: {cachedFields.debug.dax_error}
               </div>
             ) : null}
-            {fieldsQuery.data?.debug?.dax_query_failures && Object.keys(fieldsQuery.data.debug.dax_query_failures).length ? (
-              <pre className="code-block">{JSON.stringify(fieldsQuery.data.debug.dax_query_failures, null, 2)}</pre>
+            {cachedFields?.debug?.dax_query_failures && Object.keys(cachedFields.debug.dax_query_failures).length ? (
+              <pre className="code-block">{JSON.stringify(cachedFields.debug.dax_query_failures, null, 2)}</pre>
             ) : null}
-            {fieldsQuery.data?.debug?.metadata_status ? (
-              <pre className="code-block">{JSON.stringify(fieldsQuery.data.debug.metadata_status, null, 2)}</pre>
+            {cachedFields?.debug?.metadata_status ? (
+              <pre className="code-block">{JSON.stringify(cachedFields.debug.metadata_status, null, 2)}</pre>
             ) : null}
           </div>
         </section>
