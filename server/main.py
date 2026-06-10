@@ -7,7 +7,6 @@ from api.powerbi import router as powerbi_router
 from api.project import router as project_router
 from config import API_TITLE, API_VERSION, WORK_ROOT
 from database import init_db
-from canvas_service import seed_visual_templates
 
 
 def get_cors_origins():
@@ -31,7 +30,6 @@ app.add_middleware(
 @app.on_event("startup")
 def startup():
     init_db()
-    seed_visual_templates()
     os.makedirs(WORK_ROOT, exist_ok=True)
 
 

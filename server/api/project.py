@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Request
-from fastapi import File, UploadFile
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
@@ -29,7 +28,7 @@ from services.project_service import (
     update_visual,
     validate_draft,
 )
-from canvas_service import import_visual_templates_from_pbip, list_visual_templates
+from visuals import list_visual_definitions
 
 router = APIRouter(tags=["project"])
 
@@ -41,12 +40,15 @@ def list_drafts_route():
 
 @router.get("/projects/visual-templates")
 def list_visual_templates_route():
-    return list_visual_templates()
+    return list_visual_definitions()
 
 
 @router.post("/projects/visual-templates/import")
-def import_visual_templates_route(archive: UploadFile = File(...)):
-    return import_visual_templates_from_pbip(archive)
+def import_visual_templates_route():
+    raise HTTPException(
+        status_code=409,
+        detail="PBIP template import is disabled while the code-first visual registry is active.",
+    )
 
 @router.post("/projects")
 def create_draft_route(payload: CanvasReportCreate):

@@ -16,7 +16,6 @@ from models import (
     canvas_visuals,
     powerbi_workspaces,
     project_semantic_model_cache,
-    visual_templates,
 )
 from pbip_generator.connection_builder import build_dataset_reference, needs_local_semantic_model
 from pbip_generator.model_writer import SemanticModelWriter
@@ -40,6 +39,7 @@ from services.utils import (
     _safe_delete_path,
     _safe_name,
 )
+from visuals import VisualBuildContext, build_visual, get_visual_definition, validate_visual_bindings
 
 
 def _build_field_catalog(tables):
@@ -334,18 +334,6 @@ def _field_key(field):
     return f"{field.get('table','')}.{field.get('name','')}".strip(".")
 
 
-def _binding_to_field_key(binding):
-    if isinstance(binding, str):
-        return binding.strip()
-    if isinstance(binding, dict):
-        table = binding.get("table") or binding.get("tableName") or ""
-        name = binding.get("name") or binding.get("field") or binding.get("column") or ""
-        if table and name:
-            return f"{table}.{name}"
-        return name or table or ""
-    return ""
-
-
 def _default_report_json(report_settings, canvas_settings):
     theme_name = report_settings.get("themeName") or "BIFoundryTheme"
     return {
@@ -396,52 +384,6 @@ def _default_page_json(page_row):
         "width": width,
         "height": height,
     }
-
-
-def _default_visual_json(visual_row, template_row):
-    
-    base = deepcopy((template_row or {}).get("default_visual_json") or {})
-    
-    # Purge any null/invalid query from template before building
-    if not isinstance(base.get("query"), dict):
-        base["query"] = {}
-    
-    template_key = visual_row.get("template_key") or (template_row or {}).get("template_key") or "visual"
-    base.setdefault("visualType", template_key)
-    base.setdefault("position", {})
-    base["position"].setdefault("x", visual_row.get("x") or 0)
-    base["position"].setdefault("y", visual_row.get("y") or 0)
-    base["position"].setdefault("width", visual_row.get("w") or (template_row or {}).get("default_width") or 3)
-    base["position"].setdefault("height", visual_row.get("h") or (template_row or {}).get("default_height") or 2)
-    
-    bindings = visual_row.get("bindings") or {}
-    
-    # Ensure queryState is always a valid dict
-    base["query"].setdefault("queryState", {})
-    if not isinstance(base["query"].get("queryState"), dict):
-        base["query"]["queryState"] = {}
-    projections = base["query"]["queryState"].setdefault("projections", {})
-    
-    # ... rest of the binding logic unchanged
-    for slot_name, binding in bindings.items():
-        projections.setdefault(slot_name, [])
-        if isinstance(binding, list):
-            projections[slot_name] = [{"table": item.get("table"), "name": item.get("name"), "kind": item.get("kind")} if isinstance(item, dict) else item for item in binding]
-        elif isinstance(binding, dict):
-            projections[slot_name] = [
-                {
-                    "table": binding.get("table") or binding.get("tableName"),
-                    "name": binding.get("name") or binding.get("field") or binding.get("column"),
-                    "kind": binding.get("kind") or binding.get("type") or "column",
-                }
-            ]
-        elif isinstance(binding, str):
-            projections[slot_name] = [{"field": binding}]
-    base.setdefault("config", {})
-    if isinstance(visual_row.get("config"), dict):
-        base["config"].update(visual_row.get("config"))
-    base["config"].setdefault("_draftBindings", bindings)
-    return base
 
 
 def _build_field_index(snapshot_row):
@@ -581,10 +523,13 @@ def create_draft(payload):
             )
             for visual_index, visual in enumerate(page.get("visuals") or []):
                 visual = _as_dict(visual)
+                template_key = visual.get("template_key") or visual.get("visual_type") or "visual"
+                if not get_visual_definition(template_key):
+                    raise HTTPException(status_code=400, detail=f"Unsupported visual template '{template_key}'.")
                 loader.insert_canvas_visual(
                     canvas_page_id=page_id,
                     visual_order=visual.get("visual_order", visual_index),
-                    template_key=visual.get("template_key") or visual.get("visual_type") or "visual",
+                    template_key=template_key,
                     name=visual.get("name") or visual.get("visual_name") or f"Visual{visual_index + 1}",
                     x=int(visual.get("x") or 0),
                     y=int(visual.get("y") or 0),
@@ -693,10 +638,13 @@ def create_page(draft_id, payload):
         )
         for visual_index, visual in enumerate(payload.get("visuals") or []):
             visual = _as_dict(visual)
+            template_key = visual.get("template_key") or visual.get("visual_type") or "visual"
+            if not get_visual_definition(template_key):
+                raise HTTPException(status_code=400, detail=f"Unsupported visual template '{template_key}'.")
             DBLoader(conn).insert_canvas_visual(
                 canvas_page_id=page_id,
                 visual_order=visual.get("visual_order", visual_index),
-                template_key=visual.get("template_key") or visual.get("visual_type") or "visual",
+                template_key=template_key,
                 name=visual.get("name") or visual.get("visual_name") or f"Visual{visual_index + 1}",
                 x=int(visual.get("x") or 0),
                 y=int(visual.get("y") or 0),
@@ -743,6 +691,9 @@ def delete_page(page_id):
 def create_visual(page_id, payload):
     init_db()
     payload = _as_dict(payload)
+    template_key = payload.get("template_key") or payload.get("visual_type") or "visual"
+    if not get_visual_definition(template_key):
+        raise HTTPException(status_code=400, detail=f"Unsupported visual template '{template_key}'.")
     with engine.begin() as conn:
         page_row = _get_page_row(conn, page_id)
         if not page_row:
@@ -750,7 +701,7 @@ def create_visual(page_id, payload):
         visual_id = DBLoader(conn).insert_canvas_visual(
             canvas_page_id=page_id,
             visual_order=payload.get("visual_order", 0),
-            template_key=payload.get("template_key") or payload.get("visual_type") or "visual",
+            template_key=template_key,
             name=payload.get("name") or payload.get("visual_name") or "Visual",
             x=int(payload.get("x") or 0),
             y=int(payload.get("y") or 0),
@@ -766,6 +717,8 @@ def create_visual(page_id, payload):
 def update_visual(visual_id, payload):
     init_db()
     payload = _as_dict(payload)
+    if payload.get("template_key") and not get_visual_definition(payload["template_key"]):
+        raise HTTPException(status_code=400, detail=f"Unsupported visual template '{payload['template_key']}'.")
     with engine.begin() as conn:
         visual_row = _get_visual_row(conn, visual_id)
         if not visual_row:
@@ -802,70 +755,31 @@ def _validate_page(page_row):
     return errors
 
 
-def _visual_slot_definitions(template_row):
-    slots = (template_row or {}).get("slot_definitions")
-    if isinstance(slots, list) and slots:
-        return slots
-
-    derived = []
-    for slot in (template_row or {}).get("required_slots") or []:
-        derived.append(
-            {
-                "name": slot.get("label") or slot.get("key") or slot.get("name"),
-                "role": slot.get("key") or slot.get("name"),
-                "field_type": "measure" if "measure" in str(slot.get("kind")) else "column",
-                "required": True,
-                "multi": "list" in str(slot.get("kind") or ""),
-                "description": slot.get("description") or "",
-            }
-        )
-    for slot in (template_row or {}).get("optional_slots") or []:
-        derived.append(
-            {
-                "name": slot.get("label") or slot.get("key") or slot.get("name"),
-                "role": slot.get("key") or slot.get("name"),
-                "field_type": "measure" if "measure" in str(slot.get("kind")) else "any",
-                "required": False,
-                "multi": "list" in str(slot.get("kind") or ""),
-                "description": slot.get("description") or "",
-            }
-        )
-    return derived
-
-
-def _validate_visual(visual_row, template_row, field_index):
+def _validate_visual(visual_row, field_index):
     errors = []
     if not (visual_row.get("w") or 0) > 0:
         errors.append({"scope": "visual", "id": visual_row["id"], "message": "Visual width must be greater than zero."})
     if not (visual_row.get("h") or 0) > 0:
         errors.append({"scope": "visual", "id": visual_row["id"], "message": "Visual height must be greater than zero."})
-    required_slots = [slot for slot in _visual_slot_definitions(template_row) if slot.get("required")]
-    bindings = visual_row.get("bindings") or {}
-    for slot in required_slots:
-        slot_key = slot.get("key") or slot.get("name") or slot.get("role")
-        if not slot_key:
-            continue
-        candidate = bindings.get(slot_key)
-        if not candidate:
-            errors.append(
-                {
-                    "scope": "visual",
-                    "id": visual_row["id"],
-                    "message": f"Missing required binding '{slot_key}' for visual template '{visual_row.get('template_key')}'.",
-                }
-            )
-            continue
-        candidates = candidate if isinstance(candidate, list) else [candidate]
-        for item in candidates:
-            field_key = _binding_to_field_key(item)
-            if not field_key or field_key not in field_index:
-                errors.append(
-                    {
-                        "scope": "visual",
-                        "id": visual_row["id"],
-                        "message": f"Bound field '{field_key or item}' was not found in the selected semantic snapshot.",
-                    }
-                )
+    definition = get_visual_definition(visual_row.get("template_key"))
+    if not definition:
+        errors.append(
+            {
+                "scope": "visual",
+                "id": visual_row["id"],
+                "message": f"Unsupported visual template '{visual_row.get('template_key')}'.",
+            }
+        )
+        return errors
+
+    for message in validate_visual_bindings(definition, visual_row, field_index):
+        errors.append(
+            {
+                "scope": "visual",
+                "id": visual_row["id"],
+                "message": f"{message} Visual template: '{visual_row.get('template_key')}'.",
+            }
+        )
     return errors
 
 
@@ -876,17 +790,10 @@ def validate_draft(draft_id):
     field_index = {f"{field.get('table')}.{field.get('name')}": field for field in (source_snapshot.get("field_catalog") or []) if field.get("table") and field.get("name")}
     if not field_index:
         errors.append({"scope": "draft", "id": draft_id, "message": "No semantic metadata snapshot is available for validation."})
-    with engine.begin() as conn:
-        for page in detail.get("pages") or []:
-            errors.extend(_validate_page(page))
-            for visual in page.get("visuals") or []:
-                template_row = None
-                if visual.get("template_key"):
-                    template_row = _read_one(
-                        conn,
-                        select(visual_templates).where(visual_templates.c.template_key == visual.get("template_key")),
-                    )
-                errors.extend(_validate_visual(visual, template_row, field_index))
+    for page in detail.get("pages") or []:
+        errors.extend(_validate_page(page))
+        for visual in page.get("visuals") or []:
+            errors.extend(_validate_visual(visual, field_index))
     return {"draft_id": draft_id, "valid": not errors, "errors": errors, "field_count": len(field_index)}
 
 
@@ -990,17 +897,18 @@ def _build_report_payload(detail, semantic_folder_name, dataset_reference):
     for page in detail.get("pages") or []:
         visuals = []
         for visual in page.get("visuals") or []:
-            template_row = None
-            with engine.begin() as conn:
-                if visual.get("template_key"):
-                    template_row = _read_one(
-                        conn,
-                        select(visual_templates).where(visual_templates.c.template_key == visual.get("template_key")),
-                    )
+            context = VisualBuildContext(
+                page_width=page.get("width") or canvas_settings.get("width") or 1280,
+                page_height=page.get("height") or canvas_settings.get("height") or 720,
+            )
+            try:
+                visual_json = build_visual(visual.get("template_key"), visual, context)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
             visuals.append(
                 {
-                    "name": visual.get("name") or visual.get("visual_name") or f"Visual{visual.get('id')}",
-                    "visual": _default_visual_json(visual, template_row),
+                    "name": visual_json["name"],
+                    "visual": visual_json,
                 }
             )
         pages.append(

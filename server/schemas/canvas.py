@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field, AliasChoices, ConfigDict
 
 
 class VisualTemplateOut(BaseModel):
-    id: int
+    id: int | str
     template_key: str
     name: str
     category: str | None = None

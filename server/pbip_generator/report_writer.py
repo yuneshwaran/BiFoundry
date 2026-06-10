@@ -350,6 +350,10 @@ class ReportWriter:
         if not isinstance(normalized, dict):
             return normalized
 
+        # PBIR visual-container documents keep query metadata under "visual".
+        if isinstance(normalized.get("visual"), dict):
+            return normalized
+
         query = normalized.get("query")
         if not isinstance(query, dict):
             normalized["query"] = {"queryState": {"projections": {}}}

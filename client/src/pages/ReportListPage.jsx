@@ -5,11 +5,9 @@ import ReportSidebar from '../components/ReportList/ReportSidebar';
 import {
   createCanvasReport,
   deleteCanvasReport,
-  importVisualTemplates,
   importSemanticModel,
   listCanvasReports,
   listSemanticModels,
-  listVisualTemplates,
 } from '../services/canvasApi';
 
 export default function ReportListPage() {
@@ -17,7 +15,6 @@ export default function ReportListPage() {
   const queryClient = useQueryClient();
   const [newReportName, setNewReportName] = useState('Untitled Canvas');
   const [newReportProjectId, setNewReportProjectId] = useState('');
-  const [templateImportFile, setTemplateImportFile] = useState(null);
   const [semanticImportFile, setSemanticImportFile] = useState(null);
   const [importName, setImportName] = useState('');
   const [error, setError] = useState('');
@@ -31,11 +28,6 @@ export default function ReportListPage() {
   const modelsQuery = useQuery({
     queryKey: ['semantic-models'],
     queryFn: listSemanticModels,
-  });
-
-  const templatesQuery = useQuery({
-    queryKey: ['visual-templates'],
-    queryFn: listVisualTemplates,
   });
 
   const createMutation = useMutation({
@@ -55,17 +47,6 @@ export default function ReportListPage() {
       setNotice('Report deleted.');
     },
     onError: (requestError) => setError(requestError.message || 'Failed to delete canvas report.'),
-  });
-
-  const importTemplateMutation = useMutation({
-    mutationFn: (file) => importVisualTemplates(file),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['visual-templates'] });
-      setNotice('Imported PBIP template library.');
-      setTemplateImportFile(null);
-      setImportName('');
-    },
-    onError: (requestError) => setError(requestError.message || 'Failed to import PBIP template.'),
   });
 
   const importSemanticMutation = useMutation({
@@ -102,13 +83,6 @@ export default function ReportListPage() {
     deleteMutation.mutate(reportId);
   };
 
-  const handleImportTemplate = () => {
-    if (!templateImportFile) {
-      return;
-    }
-    importTemplateMutation.mutate(templateImportFile);
-  };
-
   const handleImportSemantic = () => {
     if (!semanticImportFile) {
       return;
@@ -118,7 +92,6 @@ export default function ReportListPage() {
 
   const reports = useMemo(() => reportsQuery.data || [], [reportsQuery.data]);
   const semanticModels = useMemo(() => modelsQuery.data || [], [modelsQuery.data]);
-  const visualTemplates = useMemo(() => templatesQuery.data || [], [templatesQuery.data]);
 
   useEffect(() => {
     if (!newReportProjectId && semanticModels.length) {
@@ -132,14 +105,12 @@ export default function ReportListPage() {
         <div className="hero__content">
           <div className="eyebrow">BI Foundry</div>
           <h1>Canvas reports</h1>
-          <p>Import PBIP templates into the DB-backed library, choose a datasource, then open the canvas editor to bind fields and generate a PBIP package.</p>
+          <p>Choose a datasource, then open the canvas editor to bind fields and generate a PBIP package with the code-first visual registry.</p>
         </div>
         <div className="hero__status">
           <div className="status-chip">{reportsQuery.isLoading ? 'Loading...' : `${reports.length} reports`}</div>
           <div className="status-chip status-chip--muted">{semanticModels.length ? `${semanticModels.length} semantic models` : 'No semantic models'}</div>
-          <div className="status-chip status-chip--muted">
-            {templatesQuery.isLoading ? 'Loading templates...' : `${visualTemplates.length} templates`}
-          </div>
+          <div className="status-chip status-chip--muted">1 code-first visual</div>
         </div>
       </header>
 
@@ -186,49 +157,30 @@ export default function ReportListPage() {
               </button>
             </div>
           </section>
-
-          <section className="canvas-shell" style={{ marginTop: '1rem' }}>
-            <div className="canvas-shell__header">
-              <div>
-                <div className="section-title">Import PBIP template</div>
-                <div className="canvas-shell__subtitle">Upload a report PBIP to seed the visual template library.</div>
-              </div>
-            </div>
-            <div className="stack">
-              <input className="input" type="file" accept=".zip" onChange={(event) => setTemplateImportFile(event.target.files?.[0] || null)} />
-              <button className="button button--primary" type="button" onClick={handleImportTemplate} disabled={importTemplateMutation.isPending || !templateImportFile}>
-                Import PBIP template
-              </button>
-            </div>
-          </section>
         </div>
 
         <div className="page-column page-column--right">
           <section className="properties-panel">
-            <div className="section-title">Template Library</div>
+            <div className="section-title">Visual Registry</div>
             <div className="panel-card">
-              <div className="panel-card__title">Database-backed visuals</div>
+              <div className="panel-card__title">Code-first visuals</div>
               <div className="helper-text">
-                The canvas editor pulls these templates from the database. Uploading a PBIP here seeds the library without any hard-coded visual definitions.
+                The canvas currently exposes the verified Table visual. Additional visuals are added incrementally as dedicated Python builders.
               </div>
               <div className="mini-summary">
-                <div>{visualTemplates.length} templates available</div>
-                {visualTemplates.slice(0, 5).map((template) => (
-                  <div key={template.id}>
-                    {template.name} · {template.visual_type}
-                  </div>
-                ))}
+                <div>1 visual available</div>
+                <div>Table / tableEx</div>
               </div>
             </div>
             <div className="section-title">Getting Started</div>
             <div className="panel-card">
               <div className="panel-card__title">Workflow</div>
               <div className="helper-text">
-                1. Import a PBIP template into the library.
+                1. Import or select a semantic model.
                 <br />
                 2. Choose a datasource and create a canvas report.
                 <br />
-                3. Add pages and template visuals in the editor.
+                3. Add a table and bind semantic fields in the editor.
                 <br />
                 4. Validate and compile to PBIP.
               </div>

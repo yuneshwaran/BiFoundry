@@ -84,7 +84,8 @@ export default function CanvasGrid({
             width={activePage?.width || 1280}
             layout={layout}
             isDroppable
-            onLayoutChange={onLayoutChange}
+            onDragStop={onLayoutChange}
+            onResizeStop={onLayoutChange}
             onDrop={(currentLayout, droppedItem, event) => {
               const templateId = event.dataTransfer.getData('templateId');
               const templateKey =

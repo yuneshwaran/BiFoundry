@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import CanvasGrid from '../components/Canvas/CanvasGrid';
@@ -17,7 +17,6 @@ import {
   downloadBlob,
   getProject,
   getProjectFields,
-  importProjectVisualTemplates,
   listProjectVisualTemplates,
   updateProject,
   updateProjectPage,
@@ -144,85 +143,13 @@ function orderedSlots(template) {
   return [...slots.filter((slot) => slot.required), ...slots.filter((slot) => !slot.required)];
 }
 
-function buildStarterLayouts(templateMap, settings) {
-  const resolveTemplate = (templateKey) => resolveTemplateFromMap(templateMap, templateKey);
-
-  const makeVisual = (templateKey, visual, fallbackName) => {
-    const template = resolveTemplate(templateKey);
-    const width = Number.isFinite(Number(template?.default_width)) ? Number(template.default_width) : visual.w || 3;
-    const height = Number.isFinite(Number(template?.default_height)) ? Number(template.default_height) : visual.h || 2;
-    return {
-      template_key: template?.template_key || templateKey,
-      name: visual.name || fallbackName || template?.name || String(templateKey),
-      x: visual.x ?? 0,
-      y: visual.y ?? 0,
-      w: visual.w ?? width,
-      h: visual.h ?? height,
-      bindings: {},
-      config: {},
-      raw: {},
-    };
-  };
-
-  return [
-    {
-      id: 'executive_summary',
-      name: 'Executive Summary',
-      description: 'KPI, chart, detail table, and a slicer ready to bind.',
-      page_name: 'executive_summary',
-      display_name: 'Executive Summary',
-      visuals: [
-        makeVisual('slicer', { x: 0, y: 0, w: 3, h: 2 }, 'Slicer'),
-        makeVisual('card', { x: 3, y: 0, w: 2, h: 2 }, 'KPI'),
-        makeVisual('clusteredColumnChart', { x: 5, y: 0, w: 7, h: 4 }, 'Column Chart'),
-        makeVisual('tableEx', { x: 0, y: 4, w: 12, h: 4 }, 'Table'),
-      ],
-    },
-    {
-      id: 'trend_overview',
-      name: 'Trend Overview',
-      description: 'Line and area charts for time-based analysis.',
-      page_name: 'trend_overview',
-      display_name: 'Trend Overview',
-      visuals: [
-        makeVisual('slicer', { x: 0, y: 0, w: 3, h: 2 }, 'Slicer'),
-        makeVisual('card', { x: 3, y: 0, w: 2, h: 2 }, 'KPI'),
-        makeVisual('lineChart', { x: 5, y: 0, w: 7, h: 4 }, 'Line Chart'),
-        makeVisual('areaChart', { x: 0, y: 4, w: 12, h: 4 }, 'Area Chart'),
-      ],
-    },
-    {
-      id: 'detail_drilldown',
-      name: 'Detail Drilldown',
-      description: 'Matrix and table focused on detail analysis.',
-      page_name: 'detail_drilldown',
-      display_name: 'Detail Drilldown',
-      visuals: [
-        makeVisual('slicer', { x: 0, y: 0, w: 3, h: 2 }, 'Slicer'),
-        makeVisual('card', { x: 3, y: 0, w: 2, h: 2 }, 'KPI'),
-        makeVisual('matrix', { x: 0, y: 2, w: 6, h: 4 }, 'Matrix'),
-        makeVisual('tableEx', { x: 6, y: 2, w: 6, h: 4 }, 'Table'),
-      ],
-    },
-  ].map((layout) => ({
-    ...layout,
-    settings: {
-      width: Number(settings.canvas_width) || 1280,
-      height: Number(settings.canvas_height) || 720,
-      display_option: 'FitToPage',
-    },
-  }));
-}
-
 export default function CanvasEditorPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const numericProjectId = Number(projectId);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [compiling, setCompiling] = useState(false);
-  const [templateImportFile, setTemplateImportFile] = useState(null);
   const hasHydratedRef = useRef(false);
   const saveTimerRef = useRef(null);
   const saveInFlightRef = useRef(false);
@@ -266,17 +193,6 @@ export default function CanvasEditorPage() {
   const templatesQuery = useQuery({
     queryKey: ['project-visual-templates'],
     queryFn: listProjectVisualTemplates,
-  });
-
-  const importTemplateMutation = useMutation({
-    mutationFn: (file) => importProjectVisualTemplates(file),
-    onSuccess: async (result) => {
-      await queryClient.invalidateQueries({ queryKey: ['project-visual-templates'] });
-      setTemplates([]);
-      setTemplateImportFile(null);
-      setNotice(`Imported ${result.template_count || 0} visual templates from PBIP.`);
-    },
-    onError: (requestError) => setError(requestError.message || 'Failed to import PBIP template.'),
   });
 
   const fieldsQuery = useQuery({
@@ -328,7 +244,6 @@ export default function CanvasEditorPage() {
   }, [projectQuery.data]);
 
   const templateMap = useMemo(() => buildTemplateMap(templates), [templates]);
-  const starterLayouts = useMemo(() => buildStarterLayouts(templateMap, settings), [settings, templateMap]);
 
   const activePage = useMemo(
     () => pages.find((page) => page.id === activePageId) || pages[0] || null,
@@ -569,23 +484,6 @@ export default function CanvasEditorPage() {
     });
   };
 
-  const handleCreateStarterPage = (layout) => {
-    const pageName = layout.page_name;
-    createPageMutation.mutate({
-      name: pageName,
-      page_name: pageName,
-      display_name: layout.display_name,
-      page_order: pages.length,
-      width: Number(settings.canvas_width) || 1280,
-      height: Number(settings.canvas_height) || 720,
-      visuals: layout.visuals.map((visual, index) => ({
-        ...visual,
-        visual_order: index,
-      })),
-      raw: { starter_layout: layout.id },
-    });
-  };
-
   const handleRenamePage = (pageId, nextDisplayName) => {
     updatePageLocal(pageId, { display_name: nextDisplayName });
   };
@@ -629,13 +527,6 @@ export default function CanvasEditorPage() {
       return;
     }
     createVisualMutation.mutate({ pageId: activePage.id, templateRef, x, y });
-  };
-
-  const handleImportTemplate = () => {
-    if (!templateImportFile) {
-      return;
-    }
-    importTemplateMutation.mutate(templateImportFile);
   };
 
   const handleDeleteVisual = (visualId) => {
@@ -767,17 +658,6 @@ export default function CanvasEditorPage() {
 
       <main className="workspace page-grid page-grid--builder">
         <div className="page-column page-column--left">
-          <div className="panel-card">
-            <div className="panel-card__title">Import PBIP template</div>
-            <div className="helper-text">Upload a PBIP report to strip the visual configurations into reusable DB-backed templates.</div>
-            <div className="stack">
-              <input className="input" type="file" accept=".zip" onChange={(event) => setTemplateImportFile(event.target.files?.[0] || null)} />
-              <button className="button button--primary" type="button" onClick={handleImportTemplate} disabled={!templateImportFile || importTemplateMutation.isPending}>
-                {importTemplateMutation.isPending ? 'Importing...' : 'Import PBIP template'}
-              </button>
-            </div>
-          </div>
-
           <VisualPalette
             templates={templates}
             onDragStart={(event, template) => {
@@ -790,23 +670,6 @@ export default function CanvasEditorPage() {
 
           <FieldBrowser fields={fields} selectedVisualId={selectedVisualId} onAssignField={handleAssignField} />
 
-          <div className="panel-card">
-            <div className="panel-card__title">Starter layouts</div>
-            <div className="helper-text">Create a page that is already arranged with the visuals most reports need.</div>
-            <div className="stack">
-              {starterLayouts.map((layout) => (
-                <button
-                  key={layout.id}
-                  className="button"
-                  type="button"
-                  onClick={() => handleCreateStarterPage(layout)}
-                  disabled={createPageMutation.isPending}
-                >
-                  <span>{layout.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         <div className="page-column page-column--center">

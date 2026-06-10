@@ -1,17 +1,8 @@
 import React from 'react';
-import { ChartBar, ChartColumn, LineChart, PieChart, Table, Columns3, SlidersHorizontal, SquareAsterisk, Hash, Grid2X2 } from 'lucide-react';
+import { Hash, Table } from 'lucide-react';
 
 const ICONS = {
-  clusteredBarChart: ChartBar,
-  clusteredColumnChart: ChartColumn,
-  lineChart: LineChart,
-  areaChart: LineChart,
-  card: SquareAsterisk,
-  multiRowCard: Columns3,
   tableEx: Table,
-  matrix: Grid2X2,
-  donutChart: PieChart,
-  slicer: SlidersHorizontal,
 };
 
 export default function VisualPalette({ templates, onDragStart }) {
@@ -20,7 +11,7 @@ export default function VisualPalette({ templates, onDragStart }) {
       <div className="palette">
         <div className="section-title">Visual Palette</div>
         <div className="empty-state empty-state--canvas">
-          No visual templates are available yet. Start the backend so the built-in templates can seed, or import a PBIP report from the Reports page to populate the library.
+          No code-first visual definitions are available.
         </div>
       </div>
     );
