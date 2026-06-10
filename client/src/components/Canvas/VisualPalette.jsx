@@ -1,8 +1,12 @@
 import React from 'react';
-import { Hash, Table } from 'lucide-react';
+import { BarChart2, BarChart, PieChart, Filter, Table } from 'lucide-react';
 
 const ICONS = {
   tableEx: Table,
+  clusteredBarChart: BarChart,
+  clusteredColumnChart: BarChart2,
+  donutChart: PieChart,
+  slicer: Filter,
 };
 
 export default function VisualPalette({ templates, onDragStart }) {
@@ -22,7 +26,7 @@ export default function VisualPalette({ templates, onDragStart }) {
       <div className="section-title">Visual Palette</div>
       <div className="palette__grid">
         {templates.map((template) => {
-          const Icon = ICONS[template.visual_type] || Hash;
+          const Icon = ICONS[template.visual_type] || ICONS[template.template_key] || BarChart2;
           return (
             <div
               key={template.id}

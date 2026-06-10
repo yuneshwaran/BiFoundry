@@ -1,11 +1,18 @@
 from typing import Any
 
+from visuals.bar import BAR_VISUAL, COLUMN_VISUAL
+from visuals.pie import PIE_VISUAL
+from visuals.slicer import SLICER_VISUAL
 from visuals.table import TABLE_VISUAL
 from visuals.types import VisualBuildContext, VisualDefinition
 
 
 _VISUALS: dict[str, VisualDefinition] = {
     TABLE_VISUAL.template_key: TABLE_VISUAL,
+    BAR_VISUAL.template_key: BAR_VISUAL,
+    COLUMN_VISUAL.template_key: COLUMN_VISUAL,
+    PIE_VISUAL.template_key: PIE_VISUAL,
+    SLICER_VISUAL.template_key: SLICER_VISUAL,
 }
 
 
@@ -56,5 +63,7 @@ def validate_visual_bindings(
             name = value.get("name") or value.get("field") or value.get("column")
             field_key = f"{table}.{name}" if table and name else ""
             if not field_key or field_key not in field_index:
-                errors.append(f"Bound field '{field_key or value}' was not found in the selected semantic snapshot.")
+                errors.append(
+                    f"Bound field '{field_key or value}' was not found in the selected semantic snapshot."
+                )
     return errors
