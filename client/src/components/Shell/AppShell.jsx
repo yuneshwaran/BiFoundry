@@ -1,126 +1,146 @@
-import React from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { CheckCircle2, Gauge, Settings2, Workflow, Cable } from 'lucide-react';
+import React, { useState } from 'react';
+import { NavLink, Outlet } from 'react-router-dom';
+import {
+  BarChart3,
+  Cable,
+  ChevronLeft,
+  ChevronRight,
+  CircleCheck,
+  FileStack,
+  Gauge,
+  LayoutTemplate,
+  Settings2,
+  Wifi,
+  WifiOff,
+  X,
+} from 'lucide-react';
 import { usePowerBi } from '../../context/PowerBiContext';
 
-function activeConnectionStatus(connection) {
-  if (connection?.session?.is_authenticated) {
-    return connection.session.user_email || connection.session.user_name || 'Authenticated';
-  }
-  return 'Connect a Power BI profile to begin.';
-}
-
-function ShellNavLink({ to, icon: Icon, children }) {
+function ShellNavLink({ to, icon: Icon, children, collapsed }) {
   return (
     <NavLink
       to={to}
-      className={({ isActive }) => `shell-nav__link${isActive ? ' shell-nav__link--active' : ''}`}
+      title={collapsed ? children : undefined}
+      className={({ isActive }) =>
+        `shell-nav__link${isActive ? ' shell-nav__link--active' : ''}`
+      }
       end={to === '/'}
     >
-      <Icon size={16} />
-      <span>{children}</span>
+      <span className="shell-nav__icon">
+        <Icon size={18} strokeWidth={2} />
+      </span>
+      <span className="shell-nav__label">{children}</span>
     </NavLink>
   );
 }
 
 export default function AppShell() {
-  const location = useLocation();
-  const {
-    activeConnection,
-    activeConnectionId,
-    connections,
-    notice,
-    selectConnection,
-    selectConnectionPending,
-  } = usePowerBi();
+  const { activeConnection, connections, notice, setNotice } = usePowerBi();
+  const [collapsed, setCollapsed] = useState(false);
+  const [banners, setBanners] = useState([]);
 
-  const currentPathLabel = location.pathname.startsWith('/projects/')
-    ? 'Project editor'
-    : location.pathname.startsWith('/projects')
-      ? 'Projects'
-      : location.pathname.startsWith('/connections')
-        ? 'Power BI Connections'
-        : location.pathname.startsWith('/settings')
-          ? 'Settings'
-          : 'Home';
+  const isConnected = activeConnection?.session?.is_authenticated;
+
+  const dismissBanner = (id) => setBanners((prev) => prev.filter((b) => b.id !== id));
+
+  // Expose a way for child pages to push banners via context — for now just show the global notice
+  const globalNotice = notice;
 
   return (
     <div className="app-frame">
-      <aside className="shell-sidebar">
+      {/* ── SIDEBAR ─────────────────────────────────────────── */}
+      <aside className={`shell-sidebar${collapsed ? ' shell-sidebar--collapsed' : ''}`}>
+        {/* Brand */}
         <div className="shell-brand">
           <div className="shell-brand__mark">B</div>
-          <div>
-            <div className="shell-brand__title">BIFoundry</div>
-            <div className="shell-brand__subtitle">Power BI workspace shell</div>
+          <div className="shell-brand__text">
+            <div className="shell-brand__title">BI-Foundry</div>
+            <div className="shell-brand__subtitle">Power BI Studio</div>
           </div>
         </div>
 
-        <nav className="shell-nav" aria-label="Primary">
-          <ShellNavLink to="/" icon={Gauge}>Home</ShellNavLink>
-          <ShellNavLink to="/projects" icon={Workflow}>Projects</ShellNavLink>
-          <ShellNavLink to="/connections" icon={Cable}>Power BI Connections</ShellNavLink>
-          <ShellNavLink to="/settings" icon={Settings2}>Settings</ShellNavLink>
+        {/* Nav */}
+        <nav className="shell-nav" aria-label="Primary navigation">
+          <span className="shell-nav__section-label">Main</span>
+          <ShellNavLink to="/" icon={Gauge} collapsed={collapsed}>Dashboard</ShellNavLink>
+          <ShellNavLink to="/connections" icon={Cable} collapsed={collapsed}>Connections</ShellNavLink>
+          <ShellNavLink to="/projects" icon={BarChart3} collapsed={collapsed}>Projects</ShellNavLink>
+
+          <span className="shell-nav__section-label" style={{ marginTop: 8 }}>Build</span>
+          <ShellNavLink to="/create" icon={FileStack} collapsed={collapsed}>Create Report</ShellNavLink>
+          <ShellNavLink to="/templates" icon={LayoutTemplate} collapsed={collapsed}>Templates</ShellNavLink>
+
+          <span className="shell-nav__section-label" style={{ marginTop: 8 }}>System</span>
+          <ShellNavLink to="/settings" icon={Settings2} collapsed={collapsed}>Settings</ShellNavLink>
+
+          {/* Collapse toggle */}
+          <div style={{ flex: 1 }} />
+          <button
+            className="shell-collapse-btn"
+            onClick={() => setCollapsed((v) => !v)}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            type="button"
+          >
+            <span className="shell-nav__icon">
+              {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+            </span>
+            <span className="shell-nav__label">Collapse</span>
+          </button>
         </nav>
 
-        <section className="shell-panel">
-          <div className="section-title">Active profile</div>
-          <div className="shell-status">
-            <div className="shell-status__title">{activeConnection?.label || 'No connection selected'}</div>
-            <div className="shell-status__meta">
-              {activeConnectionStatus(activeConnection)}
+        {/* Active Connection mini-card */}
+        <div className="shell-connection-card">
+          <div className="shell-connection-card__header">
+            <div
+              className={`shell-connection-card__dot${isConnected ? ' shell-connection-card__dot--connected' : ''}`}
+            />
+            <div className="shell-connection-card__name">
+              {activeConnection?.label || 'No connection'}
             </div>
-            <div className="shell-status__chips">
-              <span className="status-chip status-chip--muted">{connections.length ? `${connections.length} saved` : 'No saved profiles'}</span>
-              <span className="status-chip status-chip--muted">{activeConnection?.tenant_id || 'No tenant'}</span>
-            </div>
+            {isConnected ? (
+              <Wifi size={12} style={{ color: '#10b981', marginLeft: 'auto', flexShrink: 0 }} />
+            ) : (
+              <WifiOff size={12} style={{ color: '#6b7280', marginLeft: 'auto', flexShrink: 0 }} />
+            )}
           </div>
-          <div className="stack">
-            <label className="field-label" htmlFor="connection-picker">
-              Switch connection
-            </label>
-            <select
-              id="connection-picker"
-              className="input"
-              value={activeConnectionId || ''}
-              onChange={(event) => {
-                if (!event.target.value) {
-                  return;
-                }
-                selectConnection(Number(event.target.value));
-              }}
-              disabled={!connections.length || selectConnectionPending}
-            >
-              <option value="">Choose connection</option>
-              {connections.map((connection) => (
-                <option key={connection.id} value={connection.id}>
-                  {connection.label}
-                </option>
-              ))}
-            </select>
+          <div className="shell-connection-card__meta">
+            {isConnected
+              ? activeConnection?.session?.user_email || 'Authenticated'
+              : activeConnection
+                ? `${connections.length} profile${connections.length !== 1 ? 's' : ''} saved`
+                : 'Connect a profile to begin'}
           </div>
-          <div className="shell-mini-grid">
-            <div className="shell-mini-card">
-              <div className="shell-mini-card__label">Workspace</div>
-              <div className="shell-mini-card__value">{activeConnection?.active_workspace_name || activeConnection?.active_workspace_id || 'Not selected'}</div>
-            </div>
-            <div className="shell-mini-card">
-              <div className="shell-mini-card__label">Semantic model</div>
-              <div className="shell-mini-card__value">{activeConnection?.active_semantic_model_name || activeConnection?.active_semantic_model_id || 'Not selected'}</div>
-            </div>
-          </div>
-        </section>
-
-        <section className="shell-panel shell-panel--muted">
-          <div className="section-title">Focus</div>
-          <div className="shell-focus">
-            <CheckCircle2 size={16} />
-            <span>{currentPathLabel}</span>
-          </div>
-          {notice ? <div className="shell-notice">{notice}</div> : null}
-        </section>
+        </div>
       </aside>
 
+      {/* ── MAIN ────────────────────────────────────────────── */}
       <div className="shell-main">
+        {/* Global notice banner */}
+        {globalNotice && (
+          <div style={{ padding: '12px 28px 0' }}>
+            <div className="status-banner status-banner--success">
+              <span><CircleCheck size={15} style={{ display: 'inline', marginRight: 6 }} />{globalNotice}</span>
+              <button className="status-banner__close" onClick={() => setNotice?.('')} type="button">
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Per-page banners */}
+        {banners.length > 0 && (
+          <div className="banner-area" style={{ paddingTop: 12 }}>
+            {banners.map((b) => (
+              <div key={b.id} className={`status-banner status-banner--${b.type}`}>
+                <span>{b.message}</span>
+                <button className="status-banner__close" onClick={() => dismissBanner(b.id)} type="button">
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <Outlet />
       </div>
     </div>

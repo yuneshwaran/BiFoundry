@@ -4,11 +4,13 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import './App.css';
 import AppShell from './components/Shell/AppShell';
 import { PowerBiProvider } from './context/PowerBiContext';
-import CanvasEditorPage from './pages/CanvasEditorPage';
+import ProjectPage from './pages/ProjectPage';
 import ConnectionsPage from './pages/ConnectionsPage';
+import CreateReportPage from './pages/CreateReportPage';
 import HomePage from './pages/HomePage';
 import ProjectsPage from './pages/ProjectHubPage';
 import SettingsPage from './pages/SettingsPage';
+import TemplatesPage from './pages/TemplatesPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,9 +30,11 @@ function App() {
             <Route element={<AppShell />}>
               <Route index element={<HomePage />} />
               <Route path="projects" element={<ProjectsPage />} />
-              <Route path="projects/:projectId" element={<CanvasEditorPage />} />
+              <Route path="projects/:projectId" element={<ProjectPage />} />
               <Route path="connections" element={<ConnectionsPage />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="templates" element={<TemplatesPage />} />
+              <Route path="create" element={<CreateReportPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
