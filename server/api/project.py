@@ -11,8 +11,6 @@ from schemas.canvas import (
     CanvasVisualUpdate,
 )
 from services.project_service import (
-    cleanup_compile_output,
-    compile_draft,
     create_draft,
     create_page,
     create_visual,
@@ -28,6 +26,7 @@ from services.project_service import (
     update_visual,
     validate_draft,
 )
+from services.compile_service import cleanup_compile_output, compile_draft
 from visuals import list_visual_definitions
 
 router = APIRouter(tags=["project"])

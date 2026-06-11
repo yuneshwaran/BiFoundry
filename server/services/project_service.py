@@ -8,7 +8,9 @@ from sqlalchemy import delete, select, update
 
 from config import WORK_ROOT
 from database import engine, init_db
-from db_writer import DBLoader
+from repositories.report_repo import ReportRepo
+from repositories.page_repo import PageRepo
+from repositories.visual_repo import VisualRepo
 from extractors.semantic_extractor import extract_tables_and_relationships
 from models import (
     canvas_pages,
@@ -29,7 +31,7 @@ from services.powerbi_service import (
     _load_session_by_id,
     _session_client,
 )
-from services.utils import (
+from utils.helpers import (
     _as_dict,
     _ensure_directory,
     _load_semantic_model_row,
@@ -39,6 +41,7 @@ from services.utils import (
     _safe_delete_path,
     _safe_name,
 )
+from services.compile_service import compile_draft, cleanup_compile_output
 from visuals import VisualBuildContext, build_visual, get_visual_definition, validate_visual_bindings
 
 
@@ -496,7 +499,10 @@ def create_draft(payload):
             raise HTTPException(status_code=404, detail="Selected semantic model was not found.")
         if not name:
             name = source_row.get("semantic_model_name") or source_row.get("name") or f"Project {source_semantic_model_id}"
-        report_id = DBLoader(conn).insert_canvas_report(
+        report_repo = ReportRepo(conn)
+        page_repo = PageRepo(conn)
+        visual_repo = VisualRepo(conn)
+        report_id = report_repo.insert_canvas_report(
             name=name,
             description=payload.get("description"),
             source_semantic_model_id=source_semantic_model_id,
@@ -509,10 +515,9 @@ def create_draft(payload):
                 "source_kind": source_kind,
             },
         )
-        loader = DBLoader(conn)
         for page_index, page in enumerate(pages):
             page = _as_dict(page)
-            page_id = loader.insert_canvas_page(
+            page_id = page_repo.insert_canvas_page(
                 canvas_report_id=report_id,
                 page_order=page.get("page_order", page_index),
                 name=page.get("name") or page.get("page_name") or f"Page{page_index + 1}",
@@ -526,7 +531,7 @@ def create_draft(payload):
                 template_key = visual.get("template_key") or visual.get("visual_type") or "visual"
                 if not get_visual_definition(template_key):
                     raise HTTPException(status_code=400, detail=f"Unsupported visual template '{template_key}'.")
-                loader.insert_canvas_visual(
+                visual_repo.insert_canvas_visual(
                     canvas_page_id=page_id,
                     visual_order=visual.get("visual_order", visual_index),
                     template_key=template_key,
@@ -627,7 +632,9 @@ def create_page(draft_id, payload):
         report_row = _get_report_row(conn, draft_id)
         if not report_row:
             raise HTTPException(status_code=404, detail=f"Draft {draft_id} was not found.")
-        page_id = DBLoader(conn).insert_canvas_page(
+        page_repo = PageRepo(conn)
+        visual_repo = VisualRepo(conn)
+        page_id = page_repo.insert_canvas_page(
             canvas_report_id=draft_id,
             page_order=payload.get("page_order", 0),
             name=payload.get("name") or payload.get("page_name") or "Page",
@@ -641,7 +648,7 @@ def create_page(draft_id, payload):
             template_key = visual.get("template_key") or visual.get("visual_type") or "visual"
             if not get_visual_definition(template_key):
                 raise HTTPException(status_code=400, detail=f"Unsupported visual template '{template_key}'.")
-            DBLoader(conn).insert_canvas_visual(
+            visual_repo.insert_canvas_visual(
                 canvas_page_id=page_id,
                 visual_order=visual.get("visual_order", visual_index),
                 template_key=template_key,
@@ -698,7 +705,8 @@ def create_visual(page_id, payload):
         page_row = _get_page_row(conn, page_id)
         if not page_row:
             raise HTTPException(status_code=404, detail=f"Page {page_id} was not found.")
-        visual_id = DBLoader(conn).insert_canvas_visual(
+        visual_repo = VisualRepo(conn)
+        visual_id = visual_repo.insert_canvas_visual(
             canvas_page_id=page_id,
             visual_order=payload.get("visual_order", 0),
             template_key=template_key,
@@ -928,60 +936,4 @@ def _build_report_payload(detail, semantic_folder_name, dataset_reference):
     }
 
 
-def compile_draft(draft_id):
-    validation = validate_draft(draft_id)
-    if not validation["valid"]:
-        raise HTTPException(status_code=400, detail={"message": "Draft validation failed.", "errors": validation["errors"]})
-    init_db()
-    compile_id = uuid.uuid4().hex
-    compile_root = Path(WORK_ROOT) / "draft-compiles" / compile_id
-    _ensure_directory(compile_root)
-    with engine.begin() as conn:
-        detail = get_draft_detail(draft_id)
-        source_snapshot = detail.get("source_snapshot") or {}
-        if not source_snapshot.get("field_catalog"):
-            raise HTTPException(status_code=400, detail="Refresh the project metadata cache before compiling.")
-        source_name = _safe_name(detail.get("source_semantic_model_name") or detail["name"], fallback=detail["name"])
-        source_row, source_kind = _load_semantic_model_row(conn, detail["source_semantic_model_id"])
 
-        dataset_reference = build_dataset_reference(source_row, source_kind)
-
-        if needs_local_semantic_model(source_kind):
-            semantic_folder_name = f"{source_name}.SemanticModel"
-            dataset_payload = _synthesise_semantic_model_from_snapshot(source_name, source_snapshot)
-            SemanticModelWriter(str(compile_root)).write(dataset_payload, project_name=source_name)
-        else:
-            semantic_folder_name = None
-
-        report_payload = _build_report_payload(detail, semantic_folder_name, dataset_reference)
-        ReportWriter(str(compile_root)).write(
-            report_payload,
-            project_name=detail["name"],
-            dataset_reference=dataset_reference,
-        )
-        safe_report_name = _safe_name(detail["name"], fallback="Draft")
-        pbip_path = compile_root / f"{safe_report_name}.pbip"
-        with open(pbip_path, "w", encoding="utf-8") as file_handle:
-            json.dump(
-                {
-                    "$schema": "https://developer.microsoft.com/json-schemas/fabric/pbip/pbipProperties/1.0.0/schema.json",
-                    "version": "1.0",
-                    "artifacts": [{"report": {"path": f"{safe_report_name}.Report"}}],
-                    "settings": {"enableAutoRecovery": True},
-                },
-                file_handle,
-                indent=2,
-                ensure_ascii=False,
-            )
-    archive_name = f"{_safe_name(detail['name'], fallback='Draft')}.zip"
-    archive_path = compile_root.parent / f"{_safe_name(detail['name'], fallback='Draft')}-{compile_id}.zip"
-    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_handle:
-        for file_path in compile_root.rglob("*"):
-            if file_path.is_file():
-                zip_handle.write(file_path, arcname=file_path.relative_to(compile_root))
-    return str(archive_path), archive_name, str(compile_root)
-
-
-def cleanup_compile_output(compile_root, archive_path):
-    _safe_delete_path(compile_root)
-    _safe_delete_path(archive_path)

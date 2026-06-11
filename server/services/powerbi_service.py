@@ -18,7 +18,7 @@ from models import (
     project_semantic_model_cache,
 )
 from services.powerbi_client import PowerBIClient, decode_jwt_claims, generate_pkce_pair, iso_now
-from services.utils import _as_dict, _now, _read_one, _read_many
+from utils.helpers import _as_dict, _now, _read_one, _read_many
 
 
 def _normalize_scopes(scopes):

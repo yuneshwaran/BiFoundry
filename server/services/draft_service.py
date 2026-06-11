@@ -16,8 +16,6 @@ from services.powerbi_service import (
     update_powerbi_connection,
 )
 from services.project_service import (
-    cleanup_compile_output,
-    compile_draft,
     create_draft,
     create_page,
     create_visual,
@@ -33,6 +31,7 @@ from services.project_service import (
     update_visual,
     validate_draft,
 )
+from services.compile_service import cleanup_compile_output, compile_draft
 
 __all__ = [
     "list_powerbi_connections",

@@ -19,7 +19,7 @@ from extractors.report_extractor import ReportExtractor
 from pbip_generator.connection_builder import build_dataset_reference, needs_local_semantic_model
 from pbip_generator.report_writer import ReportWriter
 from pbip_generator.model_writer import SemanticModelWriter
-from services.utils import _safe_name, _semantic_model_package_from_files, _load_semantic_model_row
+from utils.helpers import _safe_name, _semantic_model_package_from_files, _load_semantic_model_row, _ensure_directory, _safe_delete_path
 from schema import (
     canvas_pages,
     canvas_reports,
@@ -36,26 +36,13 @@ DEFAULT_GRID_COLUMNS = 12
 DEFAULT_ROW_HEIGHT = 72
 
 
-def _as_dict(value):
-    return value.model_dump() if hasattr(value, "model_dump") else value
 
-
-def _ensure_directory(path):
-    Path(path).mkdir(parents=True, exist_ok=True)
 
 
 def _safe_write_json(path, payload):
     _ensure_directory(Path(path).parent)
     with open(path, "w", encoding="utf-8") as file_handle:
         json.dump(payload, file_handle, indent=2, ensure_ascii=False)
-
-
-def _safe_delete_path(path):
-    p = Path(path)
-    if p.is_dir():
-        shutil.rmtree(p, ignore_errors=True)
-    elif p.exists():
-        p.unlink(missing_ok=True)
 
 
 def _unzip_archive(archive_path, destination):
