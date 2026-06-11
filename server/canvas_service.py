@@ -13,7 +13,8 @@ from sqlalchemy import delete, select, update
 
 from config import PBIP_SCHEMA_URL, WORK_ROOT
 from database import engine, init_db
-from db_loader import DBLoader, DBReader
+from db_reader import DBReader
+from db_writer import DBLoader
 from extractors.report_extractor import ReportExtractor
 from pbip_generator.connection_builder import build_dataset_reference, needs_local_semantic_model
 from pbip_generator.report_writer import ReportWriter

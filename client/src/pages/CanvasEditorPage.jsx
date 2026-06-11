@@ -82,48 +82,6 @@ function resolveTemplateFromMap(templateMap, templateKey) {
   );
 }
 
-function buildVisualSaveSnapshot(visual) {
-  return {
-    id: visual.id,
-    template_key: visual.template_key,
-    visual_name: visual.visual_name || visual.name || '',
-    x: Number(visual.x) || 0,
-    y: Number(visual.y) || 0,
-    w: Number(visual.w) || 3,
-    h: Number(visual.h) || 2,
-    bindings: visual.bindings || {},
-    config: visual.config || {},
-    raw: visual.raw || {},
-    visual_order: visual.visual_order ?? 0,
-  };
-}
-
-function buildPageSaveSnapshot(page, index) {
-  return {
-    id: page.id,
-    name: page.page_name || page.name || '',
-    display_name: page.display_name || page.name || '',
-    width: Number(page.width) || 1280,
-    height: Number(page.height) || 720,
-    page_order: page.page_order ?? index,
-    raw: page.raw || {},
-    visuals: (page.visuals || []).map(buildVisualSaveSnapshot),
-  };
-}
-
-function buildCanvasSaveSnapshot(reportName, settings, pages) {
-  return {
-    reportName: reportName || '',
-    settings: {
-      canvas_width: Number(settings.canvas_width) || 1280,
-      canvas_height: Number(settings.canvas_height) || 720,
-      theme_name: settings.theme_name || 'BIFoundryTheme',
-      theme_color: settings.theme_color || '#154360',
-    },
-    pages: (pages || []).map(buildPageSaveSnapshot),
-  };
-}
-
 function slotSupportsField(slot, field) {
   const slotType = slot.field_type || 'any';
   if (slotType === 'any') {
@@ -151,9 +109,6 @@ export default function CanvasEditorPage() {
   const [notice, setNotice] = useState('');
   const [compiling, setCompiling] = useState(false);
   const hasHydratedRef = useRef(false);
-  const saveTimerRef = useRef(null);
-  const saveInFlightRef = useRef(false);
-  const lastSavedSnapshotRef = useRef('');
 
   const {
     reportName,
@@ -163,7 +118,6 @@ export default function CanvasEditorPage() {
     selectedVisualId,
     templates,
     fields,
-    isDirty,
     hydrateReport,
     setTemplates,
     setFields,
@@ -177,7 +131,6 @@ export default function CanvasEditorPage() {
     addVisualLocal,
     updateVisualLocal,
     removeVisualLocal,
-    clearDirty,
   } = useCanvasStore();
 
   const projectQuery = useQuery({
@@ -202,17 +155,13 @@ export default function CanvasEditorPage() {
   });
 
   useEffect(() => {
-    if (!projectQuery.data) {
-      return;
-    }
-
-    if (isDirty && hasHydratedRef.current) {
+    if (!projectQuery.data || hasHydratedRef.current) {
       return;
     }
 
     hydrateReport(projectQuery.data);
     hasHydratedRef.current = true;
-  }, [hydrateReport, isDirty, projectQuery.data]);
+  }, [hydrateReport, projectQuery.data]);
 
   useEffect(() => {
     if (templatesQuery.data) {
@@ -228,20 +177,6 @@ export default function CanvasEditorPage() {
       }
     }
   }, [fieldsQuery.data, setFields]);
-
-  useEffect(() => {
-    if (!projectQuery.data) {
-      return;
-    }
-    lastSavedSnapshotRef.current = JSON.stringify(
-      buildCanvasSaveSnapshot(projectQuery.data.name || '', {
-        canvas_width: projectQuery.data.canvas_settings?.width || 1280,
-        canvas_height: projectQuery.data.canvas_settings?.height || 720,
-        theme_name: projectQuery.data.report_settings?.themeName || 'BIFoundryTheme',
-        theme_color: projectQuery.data.report_settings?.themeColor || '#154360',
-      }, projectQuery.data.pages || []),
-    );
-  }, [projectQuery.data]);
 
   const templateMap = useMemo(() => buildTemplateMap(templates), [templates]);
 
@@ -268,110 +203,6 @@ export default function CanvasEditorPage() {
     );
   }, [selectedVisual, templateMap]);
 
-  useEffect(() => {
-    if (!isDirty || !Number.isFinite(numericProjectId)) {
-      return undefined;
-    }
-
-    const currentSnapshot = JSON.stringify(buildCanvasSaveSnapshot(reportName, settings, pages));
-    if (currentSnapshot === lastSavedSnapshotRef.current) {
-      clearDirty();
-      return undefined;
-    }
-
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-    }
-
-    saveTimerRef.current = setTimeout(async () => {
-      if (saveInFlightRef.current) {
-        return;
-      }
-      saveInFlightRef.current = true;
-      try {
-        const lastSnapshot = JSON.parse(lastSavedSnapshotRef.current || 'null');
-        const nextSnapshot = JSON.parse(currentSnapshot);
-
-        if (!lastSnapshot || lastSnapshot.reportName !== nextSnapshot.reportName || JSON.stringify(lastSnapshot.settings) !== JSON.stringify(nextSnapshot.settings)) {
-          await updateProject(numericProjectId, {
-            name: reportName,
-            canvas_settings: {
-              width: Number(settings.canvas_width) || 1280,
-              height: Number(settings.canvas_height) || 720,
-            },
-            report_settings: {
-              themeName: settings.theme_name || 'BIFoundryTheme',
-              themeColor: settings.theme_color || '#154360',
-            },
-          });
-        }
-
-        const lastPagesById = new Map((lastSnapshot?.pages || []).map((page) => [page.id, page]));
-        const nextPagesById = new Map((nextSnapshot.pages || []).map((page) => [page.id, page]));
-
-        const changedPages = (nextSnapshot.pages || []).filter((page) => {
-          const previous = lastPagesById.get(page.id);
-          return !previous || JSON.stringify(previous) !== JSON.stringify(page);
-        });
-
-        await Promise.all(
-          changedPages.map((page, index) =>
-            updateProjectPage(numericProjectId, page.id, {
-              name: page.name,
-              display_name: page.display_name,
-              width: page.width,
-              height: page.height,
-              page_order: page.page_order ?? index,
-              raw: page.raw,
-            }),
-          ),
-        );
-
-        const changedVisuals = [];
-        nextPagesById.forEach((page) => {
-          const previousPage = lastPagesById.get(page.id);
-          const previousVisuals = new Map((previousPage?.visuals || []).map((visual) => [visual.id, visual]));
-          (page.visuals || []).forEach((visual, index) => {
-            const previousVisual = previousVisuals.get(visual.id);
-            if (!previousVisual || JSON.stringify(previousVisual) !== JSON.stringify(visual)) {
-              changedVisuals.push({ pageId: page.id, visual, visualOrder: visual.visual_order ?? index });
-            }
-          });
-        });
-
-        await Promise.all(
-          changedVisuals.map(({ pageId, visual, visualOrder }) =>
-            updateProjectVisual(numericProjectId, pageId, visual.id, {
-              template_key: visual.template_key,
-              name: visual.visual_name || visual.name,
-              x: Number(visual.x) || 0,
-              y: Number(visual.y) || 0,
-              w: Number(visual.w) || 3,
-              h: Number(visual.h) || 2,
-              bindings: visual.bindings || {},
-              config: visual.config || {},
-              raw: visual.raw || {},
-              visual_order: visualOrder,
-            }),
-          ),
-        );
-
-        lastSavedSnapshotRef.current = currentSnapshot;
-        clearDirty();
-      } catch (requestError) {
-        setError(requestError.message || 'Failed to save canvas changes.');
-      } finally {
-        saveInFlightRef.current = false;
-      }
-    }, 1100);
-
-    return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-      }
-    };
-  }, [clearDirty, isDirty, numericProjectId, pages, reportName, settings]);
-
   const createPageMutation = useMutation({
     mutationFn: (payload) => createProjectPage(numericProjectId, payload),
     onSuccess: async (created) => {
@@ -381,7 +212,7 @@ export default function CanvasEditorPage() {
         createdPages[createdPages.length - 1] ||
         null;
 
-      if (createdPages.length) {
+      if (!hasHydratedRef.current && createdPages.length) {
         hydrateReport(created);
         hasHydratedRef.current = true;
         if (newestPage?.id) {
@@ -416,7 +247,7 @@ export default function CanvasEditorPage() {
       });
     },
     onSuccess: async (created, variables) => {
-      if (created?.pages?.length) {
+      if (!hasHydratedRef.current && created?.pages?.length) {
         hydrateReport(created);
         hasHydratedRef.current = true;
         setActivePageId(variables.pageId);
@@ -442,7 +273,7 @@ export default function CanvasEditorPage() {
   const deletePageMutation = useMutation({
     mutationFn: (pageId) => deleteProjectPage(numericProjectId, pageId),
     onSuccess: async (_result, pageId) => {
-      if (_result?.pages?.length) {
+      if (!hasHydratedRef.current && _result?.pages?.length) {
         hydrateReport(_result);
         hasHydratedRef.current = true;
       } else {
@@ -455,7 +286,7 @@ export default function CanvasEditorPage() {
   const deleteVisualMutation = useMutation({
     mutationFn: ({ pageId, visualId }) => deleteProjectVisual(numericProjectId, pageId, visualId),
     onSuccess: async (_result, variables) => {
-      if (_result?.pages?.length) {
+      if (!hasHydratedRef.current && _result?.pages?.length) {
         hydrateReport(_result);
         hasHydratedRef.current = true;
         setActivePageId(variables.pageId);
@@ -587,10 +418,59 @@ export default function CanvasEditorPage() {
     setNotice(`${normalizedField.label} assigned to ${targetSlot.name || targetSlot.role}.`);
   };
 
+  const flushToServer = async () => {
+    await updateProject(numericProjectId, {
+      name: reportName,
+      canvas_settings: {
+        width: Number(settings.canvas_width) || 1280,
+        height: Number(settings.canvas_height) || 720,
+      },
+      report_settings: {
+        themeName: settings.theme_name || 'BIFoundryTheme',
+        themeColor: settings.theme_color || '#154360',
+      },
+    });
+
+    await Promise.all(
+      pages.map((page, index) =>
+        updateProjectPage(numericProjectId, page.id, {
+          name: page.page_name || page.name,
+          display_name: page.display_name || page.name,
+          width: page.width,
+          height: page.height,
+          page_order: page.page_order ?? index,
+          raw: page.raw || {},
+        }),
+      ),
+    );
+
+    const allVisuals = pages.flatMap((page) =>
+      (page.visuals || []).map((visual, index) => ({ pageId: page.id, visual, index })),
+    );
+
+    await Promise.all(
+      allVisuals.map(({ pageId, visual, index }) =>
+        updateProjectVisual(numericProjectId, pageId, visual.id, {
+          template_key: visual.template_key,
+          name: visual.visual_name || visual.name,
+          x: Number(visual.x) || 0,
+          y: Number(visual.y) || 0,
+          w: Number(visual.w) || 3,
+          h: Number(visual.h) || 2,
+          bindings: visual.bindings || {},
+          config: visual.config || {},
+          raw: visual.raw || {},
+          visual_order: visual.visual_order ?? index,
+        }),
+      ),
+    );
+  };
+
   const handleCompile = async () => {
     setCompiling(true);
     setError('');
     try {
+      await flushToServer();
       const validation = await validateMutation.mutateAsync();
       if (!validation.valid) {
         setError(validation.errors.map((item) => item.message).join(' | '));

@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().with_name(".env"))
 
+
 # Core service configuration
 DATABASE_URL = os.getenv("DATABASE_URL")
 DEFAULT_PROJECT_NAME = os.getenv("DEFAULT_PROJECT_NAME", "MyProject")

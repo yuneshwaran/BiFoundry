@@ -8,7 +8,7 @@ from sqlalchemy import delete, select, update
 
 from config import WORK_ROOT
 from database import engine, init_db
-from db_loader import DBLoader
+from db_writer import DBLoader
 from extractors.semantic_extractor import extract_tables_and_relationships
 from models import (
     canvas_pages,
