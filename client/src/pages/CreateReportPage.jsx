@@ -4,6 +4,7 @@ import {
   BarChart2,
   BarChart3,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Database,
@@ -30,7 +31,7 @@ import {
   listProjectVisualTemplates,
 } from '../services/projectApi';
 import FieldBrowser from '../components/Canvas/FieldBrowser';
-import FieldPicker from '../components/Canvas/FieldPicker';
+import VisualFieldWell from '../components/ProjectPage/VisualFieldWell';
 import { getTemplateSlots } from '../components/Canvas/templateSlots';
 
 const MOCK_TEMPLATES = [
@@ -431,6 +432,8 @@ function Step4({
   handleUpdateVisual,
   handleBindingChange,
 }) {
+  const [isPageConfigOpen, setIsPageConfigOpen] = useState(true);
+
   const handleDragStart = (e, visualType) => {
     e.dataTransfer.setData('visualType', visualType);
   };
@@ -458,7 +461,6 @@ function Step4({
     ? templateMap.get(sel.type) ||
       templateMap.get(String(sel.type || '').toLowerCase())
     : null;
-  const slots = getTemplateSlots(selectedTemplate);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -570,121 +572,61 @@ function Step4({
         <div className="canvas-properties">
           {!sel ? (
             <div className="form-stack">
-              <div className="section-label">Page Configuration</div>
-              <div className="form-group">
-                <label className="form-label">Page Name</label>
-                <input
-                  className="form-input"
-                  value={activePageObj?.name || ''}
-                  onChange={(e) => handleUpdatePage(activePage, { name: e.target.value, display_name: e.target.value })}
-                  placeholder="Page name"
-                />
+              <div 
+                className="section-label" 
+                style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'space-between', 
+                  cursor: 'pointer',
+                  userSelect: 'none'
+                }}
+                onClick={() => setIsPageConfigOpen(!isPageConfigOpen)}
+              >
+                <span>Page Configuration</span>
+                {isPageConfigOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               </div>
-              <div className="form-group">
-                <label className="form-label">Canvas Width (px)</label>
-                <input
-                  className="form-input"
-                  type="number"
-                  value={activePageObj?.width || 1280}
-                  onChange={(e) => handleUpdatePage(activePage, { width: parseInt(e.target.value) || 1280 })}
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Canvas Height (px)</label>
-                <input
-                  className="form-input"
-                  type="number"
-                  value={activePageObj?.height || 720}
-                  onChange={(e) => handleUpdatePage(activePage, { height: parseInt(e.target.value) || 720 })}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="form-stack">
-              <div className="section-label">Visual Properties</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                {(() => {
-                  const VIcon = ICONS[sel.type] || BarChart3;
-                  return <VIcon size={18} style={{ color: 'var(--purple)' }} />;
-                })()}
-                <div style={{ fontWeight: 700, textTransform: 'capitalize' }}>
-                  {selectedTemplate?.name || sel.type}
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Visual Title</label>
-                <input
-                  className="form-input"
-                  value={sel.name || ''}
-                  onChange={(e) => handleUpdateVisual(sel.id, { name: e.target.value })}
-                  placeholder="Chart title"
-                />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                <div>
-                  <label className="form-label">X Position</label>
-                  <input
-                    className="form-input"
-                    type="number"
-                    min="0"
-                    value={sel.x ?? 0}
-                    onChange={(e) => handleUpdateVisual(sel.id, { x: parseInt(e.target.value) || 0 })}
-                  />
-                </div>
-                <div>
-                  <label className="form-label">Y Position</label>
-                  <input
-                    className="form-input"
-                    type="number"
-                    min="0"
-                    value={sel.y ?? 0}
-                    onChange={(e) => handleUpdateVisual(sel.id, { y: parseInt(e.target.value) || 0 })}
-                  />
-                </div>
-                <div>
-                  <label className="form-label">Width (Grid)</label>
-                  <input
-                    className="form-input"
-                    type="number"
-                    min="1"
-                    max="12"
-                    value={sel.w ?? 4}
-                    onChange={(e) => handleUpdateVisual(sel.id, { w: parseInt(e.target.value) || 1 })}
-                  />
-                </div>
-                <div>
-                  <label className="form-label">Height (Grid)</label>
-                  <input
-                    className="form-input"
-                    type="number"
-                    min="1"
-                    max="12"
-                    value={sel.h ?? 3}
-                    onChange={(e) => handleUpdateVisual(sel.id, { h: parseInt(e.target.value) || 1 })}
-                  />
-                </div>
-              </div>
-
-              <div className="divider" />
-              <div className="section-label">Field Slots</div>
-              {slots.length ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {slots.map((slot) => (
-                    <FieldPicker
-                      key={slot.role}
-                      slot={slot}
-                      value={sel.bindings?.[slot.role]}
-                      fields={fields}
-                      onChange={(nextValue) => handleBindingChange(sel.id, slot.role, nextValue)}
+              {isPageConfigOpen && (
+                <>
+                  <div className="form-group">
+                    <label className="form-label">Page Name</label>
+                    <input
+                      className="form-input"
+                      value={activePageObj?.name || ''}
+                      onChange={(e) => handleUpdatePage(activePage, { name: e.target.value, display_name: e.target.value })}
+                      placeholder="Page name"
                     />
-                  ))}
-                </div>
-              ) : (
-                <div style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
-                  This visual has no configurable slots.
-                </div>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Canvas Width (px)</label>
+                    <input
+                      className="form-input"
+                      type="number"
+                      value={activePageObj?.width || 1280}
+                      onChange={(e) => handleUpdatePage(activePage, { width: parseInt(e.target.value) || 1280 })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Canvas Height (px)</label>
+                    <input
+                      className="form-input"
+                      type="number"
+                      value={activePageObj?.height || 720}
+                      onChange={(e) => handleUpdatePage(activePage, { height: parseInt(e.target.value) || 720 })}
+                    />
+                  </div>
+                </>
               )}
             </div>
+          ) : (
+            <VisualFieldWell
+              visual={sel}
+              template={selectedTemplate}
+              fields={fields}
+              onBindingChange={handleBindingChange}
+              onGeometryChange={handleUpdateVisual}
+              onRemove={() => onRemoveVisual(sel.id)}
+            />
           )}
         </div>
       </div>
